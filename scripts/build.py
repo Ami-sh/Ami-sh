@@ -6,17 +6,18 @@
 
 Design
   * The README is a live terminal. One window (title bar, traffic lights) runs a
-    shell session: it types `intro` at a human rhythm, Enter prints the output at
-    once, a fresh prompt appears, it types `impact`, holds the finished screen,
-    then types `clear` and starts over. The cursor blinks only while idle.
+    shell session: it types `intro` at an even, human rhythm, Enter prints the
+    output with a soft fade, a fresh prompt appears, it types `impact`, holds the
+    finished screen, then types `clear` and starts over. Characters wipe in as
+    the caret glides; the cursor blink breathes; everything is interpolated.
     Reduced-motion visitors get one run that rests on the finished screen.
-  * Beside the text an ASCII planet rises out of the right edge: its surface is
-    a stream of backend / infra / agent tokens that turns slowly, with a
-    '....::::----++++' ramp trailing off the lit limb.
+  * Behind the right half, rows of backend / infra / agent tokens and '..::--++'
+    ramps glide left to right, each at its own speed (faster rows are brighter):
+    born clear around the middle of the window, opaque by the right edge.
   * Matte black and greys, one soft phosphor green for the prompt and cursor.
   * Type: Geist Mono + Geist Sans (SIL OFL, ../fonts), outlined to paths with
     real kerning by typeset.py, so every visitor sees exactly this typography.
-    The planet uses the visitor's monospace font, pinned to an exact grid.
+    The streams use the visitor's monospace font, pinned to an exact grid.
   * Grid: 847px (GitHub's profile column at viewports >= 1280px), 12px gutters,
     % widths for side-by-side pieces. Viewports <= 1011px get compact art.
 """
@@ -27,7 +28,7 @@ import sys
 from xml.sax.saxutils import escape, quoteattr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import planet as PL  # noqa: E402
+import flow as FL  # noqa: E402
 import typeset as T  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -150,122 +151,158 @@ def panel(pid, w, h, r=RAD, glow=(.2, .05)):
 
 
 # ------------------------------------------------------------------ session
-# The terminal is a scripted shell session on one timeline. Every element records
-# when it is on screen and Session.render() turns that into discrete SMIL.
-#   loop: replays forever. The session ends by typing `clear`, which puts the
-#         screen back exactly in its first frame, so the seam is invisible.
-#   once: plays through and rests on the finished frame (prefers-reduced-motion).
-# Static attributes always hold the finished frame, for renderers without SMIL.
-BLINK = .53                     # cursor half-period, like Terminal.app
+# The terminal is a scripted shell session on one timeline. Every element owns a few
+# keyframe tracks (opacity, rise, clip width, caret x / y) that the browser
+# interpolates linearly, so every in-between frame is drawn: characters wipe in, the
+# caret glides, lines fade up, the cursor blink breathes.
+#   loop: replays forever. The session ends by typing `clear`; the screen fades back
+#         to its first frame, so the seam is invisible.
+#   once: plays through and rests on the finished screen (prefers-reduced-motion).
+# Static attributes hold the finished screen, for renderers without SMIL.
+KEY_DT = (.07, .09)             # an even, human typing rhythm
+KEY_WIPE = .045                 # each character wipes in...
+CARET = .06                     # ...while the caret glides one cell right
+FADE_IN, FADE_OUT, RISE = .16, .18, 3.0
+BLINK_ON, BLINK_FADE, BLINK_OFF = .52, .16, .26
 
 
 def _kt(t, D):
-    return "0" if t == 0 else f"{t / D:.5f}".rstrip("0").rstrip(".")
+    return "0" if t <= 0 else "1" if t >= D else f"{t / D:.5f}".rstrip("0").rstrip(".")
 
 
-def disc(attr, ev, D, mode):
-    """Discrete animation of one attribute from [(t, value)] events."""
-    vals = {}
-    for t, v in sorted(ev, key=lambda e: e[0]):
-        t = round(max(0.0, t), 4)
-        if mode == "loop" and t >= D - 1e-6:
-            continue                    # the loop's t=0 is the same frame
-        vals[t] = v
-    items = sorted(vals.items())
-    if not items or items[0][0] != 0:
-        raise SystemExit(f"{attr}: timeline must start at t=0")
-    timing = 'repeatCount="indefinite"' if mode == "loop" else 'fill="freeze"'
-    return (f'<animate attributeName="{attr}" values="{";".join(v for _, v in items)}" '
-            f'keyTimes="{";".join(_kt(t, D) for t, _ in items)}" calcMode="discrete" '
-            f'dur="{D:.3f}s" {timing}/>')
+class Track:
+    """Keyframes of one numeric attribute, interpolated linearly between keys."""
+
+    def __init__(self, v0):
+        self.pts = [(0.0, v0)]
+
+    @property
+    def v(self):
+        return self.pts[-1][1]
+
+    def to(self, t, v, dur=0.0):
+        """Hold the current value until t, then reach v after dur (0 = a jump)."""
+        t = max(t, self.pts[-1][0])
+        if v == self.v:
+            return
+        self.pts.append((t, self.v))
+        self.pts.append((t + max(dur, .002), v))
+
+    def animate(self, attr, D, mode, fmt=n, kind="animate"):
+        pts = [p for p in self.pts if p[0] < D - 1e-4] + [(D, self.v)]
+        if mode == "loop" and fmt(pts[-1][1]) != fmt(pts[0][1]):
+            raise SystemExit(f"{attr}: the loop does not come back to its first value")
+        keys = []
+        for t, v in pts:
+            if keys and t <= keys[-1][0]:
+                t = keys[-1][0] + .0005
+            keys.append((min(t, D) if (t, v) != pts[-1] else D, v))
+        if len(keys) == 2 and fmt(keys[0][1]) == fmt(keys[1][1]):
+            return ""                           # never changes
+        timing = 'repeatCount="indefinite"' if mode == "loop" else 'fill="freeze"'
+        extra = ' type="translate"' if kind == "animateTransform" else ""
+        return (f'<{kind} attributeName="{attr}"{extra} values="{";".join(fmt(v) for _, v in keys)}" '
+                f'keyTimes="{";".join(_kt(t, D) for t, _ in keys)}" dur="{D:.3f}s" {timing}/>')
 
 
 class Session:
     def __init__(self, seed=7):
         self.t = 0.0
-        self.items = []             # [svg, on, off]
-        self.typed = []             # one per typed command
-        self.cur = []               # (t, x, y, visible)
-        self.cx = self.cy = 0.0
         self.rnd = random.Random(seed)
+        self.items = []             # (svg, opacity, rise)
+        self.typed = []             # one per typed command
+        self.cx, self.cy, self.cop = Track(0.0), Track(0.0), Track(1.0)
         self.marks = {}             # named moments, for tooling
 
     def mark(self, name):
         self.marks[name] = round(self.t, 4)
 
     def home(self, x, y):
-        self.cx, self.cy = x, y
-        self.cur.append((self.t, x, y, True))
+        self.cx.pts, self.cy.pts = [(0.0, x)], [(0.0, y)]
 
     def idle(self, d):
-        """The cursor blinks where it is (it is solid right after any keypress)."""
-        end, t, on = self.t + d, self.t, True
-        while t + BLINK < end - 1e-6:
-            t += BLINK
-            on = not on
-            self.cur.append((t, self.cx, self.cy, on))
+        """The caret breathes in place (fade out, fade in) and is solid by the end."""
+        end, t = self.t + d, self.t
+        while t + BLINK_ON + 2 * BLINK_FADE + BLINK_OFF <= end:
+            t += BLINK_ON
+            self.cop.to(t, 0, BLINK_FADE)
+            t += BLINK_FADE + BLINK_OFF
+            self.cop.to(t, 1, BLINK_FADE)
+            t += BLINK_FADE
         self.t = end
 
     def type(self, cid, inner, x, y, size, step, text):
-        """Keystrokes at an uneven, human rhythm; each one moves the cursor a cell."""
-        top, hgt = y - size * 1.05, size * 1.45
+        """Even keystrokes: each character wipes in as the caret glides past it."""
         full = len(text) * step + 6
-        keys = []
+        width, op = Track(0.0), Track(1.0)
         for i in range(len(text)):
             if i:
-                self.t += self.rnd.uniform(.06, .17)
-            keys.append((self.t, 2 + (i + 1) * step if i < len(text) - 1 else full))
-            self.cur.append((self.t, x + (i + 1) * step, y, True))
-        self.typed.append(dict(cid=cid, inner=inner, rect=(x - 2, top, full, hgt), keys=keys, off=None))
-        self.cx, self.cy = x + len(text) * step, y
+                self.t += self.rnd.uniform(*KEY_DT)
+            width.to(self.t, 2 + (i + 1) * step if i < len(text) - 1 else full, KEY_WIPE)
+            self.cx.to(self.t, x + (i + 1) * step, CARET)
+            self.cop.to(self.t, 1, .03)
+        self.typed.append(dict(cid=cid, inner=inner, width=width, op=op,
+                               rect=(x - 2, y - size * 1.05, full, size * 1.45)))
 
-    def enter(self, pause=.32):
-        """Return. The cursor leaves while the program prints."""
+    def enter(self, pause=.3):
+        """Return. The caret leaves while the program prints."""
         self.t += pause
-        self.cur.append((self.t, self.cx, self.cy, False))
+        self.cop.to(self.t, 0, .08)
 
-    def print(self, svg_, gap=.03):
-        self.t += gap
-        self.items.append([svg_, self.t, None])
+    def _show(self, svg_):
+        op, rise = Track(0.0), Track(RISE)
+        op.to(self.t, 1, FADE_IN)
+        rise.to(self.t, 0, FADE_IN)
+        self.items.append((svg_, op, rise))
 
-    def prompt(self, svg_, x, y, gap=.05):
+    def print(self, svg_, gap=.045):
         self.t += gap
-        self.items.append([svg_, self.t, None])
-        self.home(x, y)
+        self._show(svg_)
+
+    def prompt(self, svg_, x, y, gap=.07):
+        self.t += gap
+        self._show(svg_)
+        self.cx.to(self.t, x)                   # jump while hidden...
+        self.cy.to(self.t, y)
+        self.cop.to(self.t + .05, 1, .12)       # ...then fade in on the new line
+        self.t += .17
 
     def clear(self, x, y):
-        """`clear`: every line goes and the prompt is back at the top."""
-        for it in self.items:
-            if it[2] is None:
-                it[2] = self.t
+        """`clear`: everything fades out and the caret is back at the top prompt."""
+        t0 = self.t
+        for _, op, rise in self.items:
+            op.to(t0, 0, FADE_OUT)
+            rise.to(t0 + FADE_OUT, RISE)
         for tp in self.typed:
-            if tp["off"] is None:
-                tp["off"] = self.t
-        self.home(x, y)
-
-    def rest(self):
-        """End of a one-shot run: the cursor settles, solid."""
-        self.cur.append((self.t, self.cx, self.cy, True))
+            tp["op"].to(t0, 0, FADE_OUT)
+            tp["width"].to(t0 + FADE_OUT, 0.0)
+            tp["op"].to(t0 + FADE_OUT + .002, 1)     # unseen: its width is 0 by now
+        t1 = t0 + FADE_OUT + .01
+        self.cx.to(t1, x)
+        self.cy.to(t1, y)
+        self.cop.to(t1 + .02, 1, .14)
+        self.t = t1 + .5                            # the loop restarts exactly here
 
     def render(self, mode, D, size, base, defs):
         body = []
-        for svg_, on, off in self.items:
-            ev = [(0, "0"), (on, "1")] + ([(off, "0")] if off is not None else [])
-            body.append(f'<g>{disc("opacity", ev, D, mode)}{svg_}</g>')
+        for svg_, op, rise in self.items:
+            body.append(f'<g>{op.animate("opacity", D, mode)}'
+                        f'{rise.animate("transform", D, mode, lambda v: "0 " + n(v), "animateTransform")}'
+                        f'{svg_}</g>')
         for tp in self.typed:
             x, top, full, hgt = tp["rect"]
-            ev = ([(0, "0")] + [(t, n(wd)) for t, wd in tp["keys"]]
-                  + ([(tp["off"], "0")] if tp["off"] is not None else []))
             defs.append(f'<clipPath id="{tp["cid"]}"><rect x="{n(x)}" y="{n(top)}" width="{n(full)}" '
-                        f'height="{n(hgt)}">{disc("width", ev, D, mode)}</rect></clipPath>')
-            body.append(f'<g clip-path="url(#{tp["cid"]})">{tp["inner"]}</g>')
+                        f'height="{n(hgt)}">{tp["width"].animate("width", D, mode)}</rect></clipPath>')
+            body.append(f'<g clip-path="url(#{tp["cid"]})">{tp["op"].animate("opacity", D, mode)}'
+                        f'{tp["inner"]}</g>')
         cw, chh, lift = adv(size) * .98, size * 1.2, size * .92
         bx, by = base
         body.append(
-            f'<rect x="{n(bx)}" y="{n(by - lift)}" width="{n(cw)}" height="{n(chh)}" rx="1" fill="{ACC}">'
-            + disc("x", [(t, n(x)) for t, x, _, _ in self.cur], D, mode)
-            + disc("y", [(t, n(y - lift)) for t, _, y, _ in self.cur], D, mode)
-            + disc("opacity", [(t, "1" if v else "0") for t, _, _, v in self.cur], D, mode)
+            f'<rect x="{n(bx)}" y="{n(by - lift)}" width="{n(cw)}" height="{n(chh)}" rx="1" '
+            f'fill="{ACC}" fill-opacity=".9">'
+            + self.cx.animate("x", D, mode)
+            + self.cy.animate("y", D, mode, lambda v: n(v - lift))
+            + self.cop.animate("opacity", D, mode)
             + "</rect>")
         return "".join(body)
 
@@ -288,9 +325,8 @@ def prompt_parts(cmd):
 
 
 TIMELINES = {}                  # (compact, mode) -> named moments, for tooling
-FLOW_FRAMES, FLOW_DT = 24, .125   # planet field: 24 frames, a 3s seamless loop
-SCROLL_DT = .09                 # planet tokens drift right one cell per step
 HOLD = 8.0                      # loop: seconds the finished screen stays up before `clear`
+BAND = 78                       # compact: height of the stream band under the last prompt
 
 
 def hero(compact=False, mode="loop"):
@@ -321,12 +357,12 @@ def hero(compact=False, mode="loop"):
     y = y1 + (38 if compact else 52)
     for line in intro:
         fits(line, ss, (w * .78 if compact else 520), "mono", 500, s_tr)
-        sh.print(mono(line, pad - 1, y, ss, INK, 500, s_tr)[0], gap=.025)
+        sh.print(mono(line, pad - 1, y, ss, INK, 500, s_tr)[0])
         y += st_lead
     y += (28 if compact else 34) - st_lead
     for line in stack:
         fits(line, ls_, w - 2 * pad)
-        sh.print(mono(line, pad, y, ls_, INK3)[0], gap=.025)
+        sh.print(mono(line, pad, y, ls_, INK3)[0])
         y += 16
     y += (38 if compact else 50) - 16
 
@@ -334,7 +370,7 @@ def hero(compact=False, mode="loop"):
     p2, x2 = runs(prompt_parts(""), pad, y, ps)
     sh.prompt(p2, x2, y)
     sh.mark("prompt2")
-    sh.idle(1.4)
+    sh.idle(1.3)
     sh.mark("type2")
     sh.type("ty2", mono("impact", x2, y, ps, INK)[0], x2, y, ps, pstep, "impact")
     sh.mark("typed2")
@@ -346,13 +382,13 @@ def hero(compact=False, mode="loop"):
             last = i == len(IMPACT) - 1
             a, xa = runs([("└─ " if last else "├─ ", INK4), (key + "  ", INK3)], pad, y, 11.5)
             b, _ = mono(fig, xa, y, 11.5, INK, 500)
-            sh.print(a + b, gap=.04)
+            sh.print(a + b)
             ind = pad + adv(11.5) * 3
             fits(desc, 11, w - ind - pad); fits(ctx, 11, w - ind - pad)
             pipe1 = "" if last else mono("│", pad, y + 16, 11.5, INK4)[0]
             pipe2 = "" if last else mono("│", pad, y + 31, 11.5, INK4)[0]
-            sh.print(pipe1 + mono(desc, ind, y + 16, 11, INK2)[0], gap=.04)
-            sh.print(pipe2 + mono(ctx, ind, y + 31, 11, INK3)[0], gap=.04)
+            sh.print(pipe1 + mono(desc, ind, y + 16, 11, INK2)[0])
+            sh.print(pipe2 + mono(ctx, ind, y + 31, 11, INK3)[0])
             y += 55
         y += 34 - 55 + 31
     else:
@@ -366,10 +402,10 @@ def hero(compact=False, mode="loop"):
             b, _ = mono(fig, col_fig, y, isz, INK, 500)
             c, _ = mono(desc, col_desc, y, isz, INK2)
             fits(desc, isz, 560 - col_desc)
-            sh.print(a + b + c, gap=.04)
+            sh.print(a + b + c)
             pipe = "" if last else mono("│", pad, y + 19, isz, INK4)[0]
             fits(ctx, 12.5, 560 - col_desc)
-            sh.print(pipe + mono(ctx, col_desc, y + 19, 12.5, INK3)[0], gap=.04)
+            sh.print(pipe + mono(ctx, col_desc, y + 19, 12.5, INK3)[0])
             y += 46
         y += 42 - 46 + 19
 
@@ -382,42 +418,33 @@ def hero(compact=False, mode="loop"):
         sh.mark("type3")
         sh.type("ty3", mono("clear", x3, y, ps, INK)[0], x3, y, ps, pstep, "clear")
         sh.mark("typed3")
-        sh.enter(.3)
+        sh.enter(.28)
         sh.clear(x1, y1)
         D = sh.t
     else:
         sh.idle(3.2)
-        sh.rest()
         D = sh.t + .05
     sh.marks["D"] = round(D, 4)
     TIMELINES[(compact, mode)] = sh.marks
     body.append(sh.render(mode, D, ps, (x3, y), defs))
-    h = round(y + (22 if compact else 30))
+    h = round(y + (22 + BAND if compact else 30))
 
-    # ---- planet: a flowing ASCII field, the terminal's backdrop. Its tokens condense
-    # out of the '....::::----++++' ramp at the lit limb and stream off to the right.
-    if compact:      # a quarter planet peeking out of the top-right corner
-        R, cx, cy, gx0, sx0 = 104, w + 8, bar - 14, w - 140, w
-        cw, chh, fsz, tail = 4.8, 9.6, 7.8, 58
+    # ---- backdrop: ASCII streams glide left to right, born clear mid-window and
+    # growing opaque toward the right edge
+    if compact:      # phones: a band of its own under the last prompt, clear of all text
+        y0b, y1b = y + 16, h - 3
+        fd, fb = FL.streams("f", 0, y0b, w, y1b, 9.6, 4.8, 7.8,
+                            w + 24, (y0b + y1b) / 2, w + 24 - 104, (y1b - y0b) / 2 + 26,
+                            speed=(11.0, 26.0))
     else:
-        R, cx, cy, gx0, sx0 = 190, w + 26, bar + (h - bar) / 2, w - 400, 590
-        cw, chh, fsz, tail = 6.0, 12.0, 9.6, 124
-    pl = PL.FlowPlanet(gx0, bar + 2, w, h - 2, cw, chh, cx, cy, R, tail=tail, frames=FLOW_FRAMES,
-                       star_x0=sx0)
-    pdefs, pbody = PL.flowing(pl, "p", frame_dt=FLOW_DT, scroll_dt=SCROLL_DT)
-    defs.append(pdefs)
-    defs.append(f'<radialGradient id="halo" cx="{n(cx)}" cy="{n(cy)}" r="{n(R * 1.24)}" gradientUnits="userSpaceOnUse">'
-                f'<stop offset=".74" stop-color="#fff" stop-opacity="0"/>'
-                f'<stop offset=".805" stop-color="#fff" stop-opacity=".055"/>'
-                f'<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>')
-    halo = (f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(R * 1.24)}" fill="url(#halo)"/>'
-            f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(R)}" fill="#000" fill-opacity=".28"/>')
-    planet = (f'<g clip-path="url(#wc)" fill="#fff" font-family="{PL.FONT}" font-size="{fsz}" '
-              f'xml:space="preserve">{halo}{pbody}</g>')
+        fd, fb = FL.streams("f", 400, bar + 2, w, h - 2, 12.0, 6.0, 9.6,
+                            w + 34, bar + (h - bar) / 2, w + 34 - 452, (h - bar) / 2 + 70)
+    defs.append(fd)
+    art = f'<g clip-path="url(#wc)">{fb}</g>'
 
     cd, cb, edge = window_chrome(w, h, bar, f"{USER}: ~", tsize)
     defs.append(cd)
-    return svg(w, h, cb + planet + "".join(body) + edge, "".join(defs), ALT)
+    return svg(w, h, cb + art + "".join(body) + edge, "".join(defs), ALT)
 
 
 # -------------------------------------------------------------------- cards
