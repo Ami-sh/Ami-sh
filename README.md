@@ -2,7 +2,7 @@
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&height=180&color=0:6a5af9,100:00c2a8&text=Hi%2C%20I'm%20Ami&fontColor=ffffff&fontSize=52&fontAlignY=36&desc=I%20build%20LLM%20agents%2C%20dev%20tools%20and%20ML%20systems&descAlignY=58&descSize=18" width="100%" alt="Hi, I'm Ami" />
+<img src="https://capsule-render.vercel.app/api?type=waving&height=180&color=0:6a5af9,100:00c2a8&text=Hi%2C%20I'm%20Ami&fontColor=ffffff&fontSize=52&fontAlignY=36&desc=I%20build%20scalable%20backends%2C%20infra%20and%20agentic%20systems&descAlignY=58&descSize=18" width="100%" alt="Hi, I'm Ami" />
 
 <a href="https://github.com/Ami-sh?tab=repositories">
   <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=500&size=18&duration=3500&pause=900&color=6A5AF9&center=true&vCenter=true&width=520&lines=Independent+LLM+code+review;Agents+that+scale+to+hundreds+of+tools;Async+systems+%E2%80%A2+ML+%E2%80%A2+robotics" alt="typing intro" />
