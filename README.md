@@ -32,7 +32,7 @@
 
 [pr-reviewer](https://github.com/Ami-sh/pr-reviewer) — one-shot LLM PR review that tries to refute its own findings
 
-[agentami](https://github.com/Ami-sh/agentami) — a LangGraph agent that picks its top-k tools per turn · `pip install agentami`
+[agentami](https://github.com/Ami-sh/agentami) — a LangGraph agent that picks its top-k tools per turn · on PyPI
 
 [Hangman](https://github.com/Ami-sh/Hangman) — ~51% win rate on unseen words vs an 18% baseline
 
