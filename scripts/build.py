@@ -75,12 +75,11 @@ LINKS = [
     ("math.se", "https://math.stackexchange.com/users/824283/amish-gupta", "Math Stack Exchange profile"),
 ]
 COMPACT_LABEL = {"stackoverflow": ["stack", "overflow"], "physics.se": ["physics", ".se"]}
-ALT = ("Terminal — ami@sh:~$ intro: I build scalable backends, infra and agentic systems. "
-       "Python, Go, Kubernetes, Kafka, LangGraph. ami@sh:~$ impact: backends — from 10 to 800 users "
-       "in a week with zero downtime (AI stock-analysis agent backend); infra — mean time to first "
-       "response cut by 90% with a self-healing Kubernetes operator across 75+ services; agents — up "
-       "to +10 percentage points for open-source Qwen models on AndroidWorld and MobileWorld, "
-       "trained on trajectories from my agent harness.")
+ALT = ("Animated terminal. I build scalable backends, infra and agentic systems. "
+       "Stack: Python, Go, Kubernetes, Kafka, LangGraph. Impact: backends, 10 to 800 users in a week "
+       "with zero downtime (AI stock-analysis agent backend); infra, mean time to first response cut "
+       "by 90% (self-healing Kubernetes operator, 75+ services); agents, up to +10 percentage points "
+       "for Qwen on AndroidWorld and MobileWorld, from my agent harness's trajectories.")
 
 
 # ------------------------------------------------------------------ helpers
@@ -136,15 +135,17 @@ GRAIN = ('<filter id="grain" x="0" y="0" width="100%" height="100%">'
          '<feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2.2 0 0 0 -1.05"/></filter>')
 
 
-def panel(pid, w, h, r=RAD, glow=(.2, .05)):
-    """Matte panel: base, soft top-left light, grain, hairline border."""
+def panel(pid, w, h, r=RAD, glow=(.2, .05), grain=True):
+    """Matte panel: base, soft top-left light, grain, hairline border. The animated
+    hero skips the grain: an image that animates is redrawn every frame."""
     defs = (f'<clipPath id="{pid}c"><rect width="{n(w)}" height="{n(h)}" rx="{r}"/></clipPath>'
             f'<radialGradient id="{pid}k" cx="{n(w * glow[0])}" cy="0" r="{n(max(w, h) * .8)}" '
             f'gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity="{glow[1]}"/>'
             f'<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>')
     base = (f'<rect width="{n(w)}" height="{n(h)}" rx="{r}" fill="{BG}"/>'
             f'<g clip-path="url(#{pid}c)"><rect width="{n(w)}" height="{n(h)}" fill="url(#{pid}k)"/>'
-            f'<rect width="{n(w)}" height="{n(h)}" filter="url(#grain)" opacity=".05"/></g>')
+            + (f'<rect width="{n(w)}" height="{n(h)}" filter="url(#grain)" opacity=".05"/>' if grain else "")
+            + '</g>')
     edge = (f'<rect x=".5" y=".5" width="{n(w - 1)}" height="{n(h - 1)}" rx="{r - .5}" fill="none" '
             f'stroke="#fff" stroke-opacity=".09"/>')
     return defs, base, edge
@@ -231,8 +232,9 @@ class Session:
             t += BLINK_FADE
         self.t = end
 
-    def type(self, cid, inner, x, y, size, step, text):
-        """Even keystrokes: each character wipes in as the caret glides past it."""
+    def type(self, cid, inner, x, y, size, step, text, final=True):
+        """Even keystrokes: each character wipes in as the caret glides past it.
+        final=False: not on the finished screen (static width 0 for non-SMIL renderers)."""
         full = len(text) * step + 6
         width, op = Track(0.0), Track(1.0)
         for i in range(len(text)):
@@ -241,7 +243,7 @@ class Session:
             width.to(self.t, 2 + (i + 1) * step if i < len(text) - 1 else full, KEY_WIPE)
             self.cx.to(self.t, x + (i + 1) * step, CARET)
             self.cop.to(self.t, 1, .03)
-        self.typed.append(dict(cid=cid, inner=inner, width=width, op=op,
+        self.typed.append(dict(cid=cid, inner=inner, width=width, op=op, final=final,
                                rect=(x - 2, y - size * 1.05, full, size * 1.45)))
 
     def enter(self, pause=.3):
@@ -255,7 +257,7 @@ class Session:
         rise.to(self.t, 0, FADE_IN)
         self.items.append((svg_, op, rise))
 
-    def print(self, svg_, gap=.045):
+    def print(self, svg_, gap=.018):
         self.t += gap
         self._show(svg_)
 
@@ -291,7 +293,8 @@ class Session:
                         f'{svg_}</g>')
         for tp in self.typed:
             x, top, full, hgt = tp["rect"]
-            defs.append(f'<clipPath id="{tp["cid"]}"><rect x="{n(x)}" y="{n(top)}" width="{n(full)}" '
+            defs.append(f'<clipPath id="{tp["cid"]}"><rect x="{n(x)}" y="{n(top)}" '
+                        f'width="{n(full if tp["final"] else 0)}" '
                         f'height="{n(hgt)}">{tp["width"].animate("width", D, mode)}</rect></clipPath>')
             body.append(f'<g clip-path="url(#{tp["cid"]})">{tp["op"].animate("opacity", D, mode)}'
                         f'{tp["inner"]}</g>')
@@ -309,7 +312,7 @@ class Session:
 
 # --------------------------------------------------------------------- hero
 def window_chrome(w, h, bar, title, tsize):
-    defs, base, edge = panel("w", w, h, glow=(.16, .045))
+    defs, base, edge = panel("w", w, h, glow=(.16, .045), grain=False)
     b = [base, f'<g clip-path="url(#wc)"><rect width="{n(w)}" height="{bar}" fill="{BAR}"/></g>',
          f'<path d="M0 {n(bar - .5)}H{n(w)}" stroke="#fff" stroke-opacity=".06"/>']
     dr, gap = (5.5, 19) if bar > 34 else (4.5, 15)
@@ -325,7 +328,7 @@ def prompt_parts(cmd):
 
 
 TIMELINES = {}                  # (compact, mode) -> named moments, for tooling
-HOLD = 8.0                      # loop: seconds the finished screen stays up before `clear`
+HOLD = 15.0                     # loop: seconds the finished screen stays up before `clear`
 BAND = 78                       # compact: height of the stream band under the last prompt
 
 
@@ -339,7 +342,7 @@ def hero(compact=False, mode="loop"):
         ps, ss, ls_, st_lead = 13, 30, 12, 39
         intro, stack = INTRO, [STACK]
     s_tr = -0.04
-    defs, body = [GRAIN], []
+    defs, body = [], []
     pstep = adv(ps)
     sh = Session()
 
@@ -355,9 +358,9 @@ def hero(compact=False, mode="loop"):
     sh.enter()
     sh.mark("enter1")
     y = y1 + (38 if compact else 52)
-    for line in intro:
+    for k, line in enumerate(intro):
         fits(line, ss, (w * .78 if compact else 520), "mono", 500, s_tr)
-        sh.print(mono(line, pad - 1, y, ss, INK, 500, s_tr)[0])
+        sh.print(mono(line, pad - 1, y, ss, INK, 500, s_tr)[0], gap=.05 if k == 0 else .018)
         y += st_lead
     y += (28 if compact else 34) - st_lead
     for line in stack:
@@ -376,19 +379,28 @@ def hero(compact=False, mode="loop"):
     sh.mark("typed2")
     sh.enter()
     sh.mark("enter2")
+    def branch(x, y, size, prev_tick):
+        """`tree` connectors as hairlines: the trunk from the previous branch (or just
+        above the first) down to this one, and this branch's tick."""
+        tx, ty = x + adv(size) * .45, y - size * .33
+        top = prev_tick if prev_tick is not None else ty - size * .72
+        return (f'<path d="M{n(tx)} {n(top)}V{n(ty)}H{n(x + adv(size) * 2.35)}" fill="none" '
+                f'stroke="{INK4}" stroke-width="1.1"/>'), ty
+
+    tick = None
     if compact:
         y += 26
+        isz = 11.5
         for i, (key, fig, desc, ctx) in enumerate(IMPACT):
             last = i == len(IMPACT) - 1
-            a, xa = runs([("└─ " if last else "├─ ", INK4), (key + "  ", INK3)], pad, y, 11.5)
-            b, _ = mono(fig, xa, y, 11.5, INK, 500)
-            sh.print(a + b)
-            ind = pad + adv(11.5) * 3
+            br, tick = branch(pad, y, isz, tick)
+            a, xa = runs([(key + "  ", INK3)], pad + adv(isz) * 3, y, isz)
+            b, _ = mono(fig, xa, y, isz, INK, 500)
+            sh.print(br + a + b, gap=.06 if i == 0 else .018)
+            ind = pad + adv(isz) * 3
             fits(desc, 11, w - ind - pad); fits(ctx, 11, w - ind - pad)
-            pipe1 = "" if last else mono("│", pad, y + 16, 11.5, INK4)[0]
-            pipe2 = "" if last else mono("│", pad, y + 31, 11.5, INK4)[0]
-            sh.print(pipe1 + mono(desc, ind, y + 16, 11, INK2)[0])
-            sh.print(pipe2 + mono(ctx, ind, y + 31, 11, INK3)[0])
+            sh.print(mono(desc, ind, y + 16, 11, INK2)[0])
+            sh.print(mono(ctx, ind, y + 31, 11, INK3)[0])
             y += 55
         y += 34 - 55 + 31
     else:
@@ -398,14 +410,14 @@ def hero(compact=False, mode="loop"):
         col_desc = pad + adv(isz) * 25
         for i, (key, fig, desc, ctx) in enumerate(IMPACT):
             last = i == len(IMPACT) - 1
-            a, _ = runs([("└─ " if last else "├─ ", INK4), (key, INK3)], pad, y, isz)
+            br, tick = branch(pad, y, isz, tick)
+            a, _ = mono(key, pad + adv(isz) * 3, y, isz, INK3)
             b, _ = mono(fig, col_fig, y, isz, INK, 500)
             c, _ = mono(desc, col_desc, y, isz, INK2)
             fits(desc, isz, 560 - col_desc)
-            sh.print(a + b + c)
-            pipe = "" if last else mono("│", pad, y + 19, isz, INK4)[0]
+            sh.print(br + a + b + c, gap=.06 if i == 0 else .018)
             fits(ctx, 12.5, 560 - col_desc)
-            sh.print(pipe + mono(ctx, col_desc, y + 19, 12.5, INK3)[0])
+            sh.print(mono(ctx, col_desc, y + 19, 12.5, INK3)[0])
             y += 46
         y += 42 - 46 + 19
 
@@ -416,7 +428,7 @@ def hero(compact=False, mode="loop"):
     if mode == "loop":
         sh.idle(HOLD)
         sh.mark("type3")
-        sh.type("ty3", mono("clear", x3, y, ps, INK)[0], x3, y, ps, pstep, "clear")
+        sh.type("ty3", mono("clear", x3, y, ps, INK)[0], x3, y, ps, pstep, "clear", final=False)
         sh.mark("typed3")
         sh.enter(.28)
         sh.clear(x1, y1)
