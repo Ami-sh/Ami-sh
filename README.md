@@ -18,12 +18,12 @@ I build scalable backends, infra and agentic systems.
 
 ### `$ ls -l ~/featured`
 
-| | repo | what it does | stack |
-|:-:|---|---|---|
-| `>` | [**`pr-reviewer`**](https://github.com/Ami-sh/pr-reviewer) | Independent one-shot LLM reviewer for any GitHub PR: parallel review lenses (correctness, security, tests, reward-hacking) and an adversarial verifier that tries to refute every finding before it reaches you | `python` `claude` `openai-compatible` |
-| `>` | [**`agentami`**](https://github.com/Ami-sh/agentami) | Drop-in LangGraph agent for when your AI has too many tools: picks the top-k relevant tools per turn and prunes context to stay under token limits. `pip install agentami` | `python` `langgraph` |
-| `>` | [**`hangman-solver`**](https://github.com/Ami-sh/Hangman) | Regex-template similarity scoring tuned with Bayesian optimisation (Optuna): **~51%** win rate on unseen words vs an 18% baseline | `python` `optuna` |
-| `>` | [**`masked-face-verification`**](https://github.com/Ami-sh/MaskedFaceVerification) | Verifies a masked face against an unmasked photo by normalising the lower half of both faces before DeepFace | `python` `cv` |
+| repo | what it does | stack |
+|---|---|---|
+| [**`pr-reviewer`**](https://github.com/Ami-sh/pr-reviewer) | Independent one-shot LLM reviewer for any GitHub PR: parallel review lenses (correctness, security, tests, reward-hacking) and an adversarial verifier that tries to refute every finding before it reaches you | `python` `claude` |
+| [**`agentami`**](https://github.com/Ami-sh/agentami) | Drop-in LangGraph agent for when your AI has too many tools: picks the top-k relevant tools per turn and prunes context to stay under token limits. `pip install agentami` | `python` `langgraph` |
+| [**`hangman-solver`**](https://github.com/Ami-sh/Hangman) | Regex-template similarity scoring tuned with Bayesian optimisation (Optuna): **~51%** win rate on unseen words vs an 18% baseline | `python` `optuna` |
+| [**`masked-face-verify`**](https://github.com/Ami-sh/MaskedFaceVerification) | Verifies a masked face against an unmasked photo by normalising the lower half of both faces before DeepFace | `python` `cv` |
 
 <details>
 <summary><code>$ ls ~/archive</code></summary>
