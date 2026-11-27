@@ -23,7 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import typeset as T  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-W = 784          # desktop width of every full-width piece (README column ~790px)
+W = 846          # desktop width of every full-width piece: GitHub's profile README
+                 # column is 847px at any viewport >= ~1280px (measured on github.com)
 GAP = 12         # gutter between panels, everywhere (horizontal AND vertical)
 
 # ------------------------------------------------------------------ palette
@@ -53,10 +54,12 @@ STATS = [
 CARDS = [
     dict(slug="pr-reviewer", url="https://github.com/Ami-sh/pr-reviewer",
          lines=["Independent one-shot LLM review for any PR,", "with an adversarial verifier on every finding."],
+         mlines=["One-shot LLM review for", "any PR with an adversarial", "verifier on each finding."],
          tag="python · claude"),
     dict(slug="agentami", url="https://github.com/Ami-sh/agentami",
          lines=["A LangGraph agent for when your AI has too", "many tools: picks the top-k for every turn."],
-         tag="pip install agentami"),
+         mlines=["A LangGraph agent for AIs", "with too many tools: picks", "the top-k on every turn."],
+         tag="pip install agentami", mtag="python · pypi"),
 ]
 
 LINKS = [
@@ -248,7 +251,7 @@ def hero(mobile=False):
     else:
         w, h = W, 420
         wm_size, wm_y, pad = 116, 194, 36
-        orb = (624, 206, (62, 116, 176), 1.0)
+        orb = (W - 166, 208, (64, 120, 182), 1.0)
     defs, body = [GRAIN, BLUR("soft", 4)], []
     d, b = panel("h", 0, 0, w, h, r=22, key=(.2, 0), keyr=1.1, keya=.095)
     defs.append(d); body.append(b)
@@ -383,8 +386,11 @@ def stats(mobile=False):
 
 
 # -------------------------------------------------------------------- cards
-SLAB_W, CARD_H = 386, 148     # two slabs + one gutter = W (the inline space adds ~4px)
-CARD_GUTTER = GAP - 4         # transparent strip on the left card's right side
+CARD_H = 148
+SLAB_W = (W - GAP) / 2        # two slabs + one gutter = W (GitHub's inline space is 4px)
+CARD_GUTTER = GAP             # transparent strip on the left card's right side
+M_SLAB, M_H = 176, 146        # phone cards: two compact tiles side by side (~50% each)
+M_GUTTER = 6
 
 
 def card(c, gutter):
@@ -409,6 +415,32 @@ def card(c, gutter):
         y += 20
     alt = f'{c["slug"]}: {" ".join(c["lines"])} ({c["tag"]})'
     return svg(w + gutter, CARD_H, "".join(body), "".join(defs), alt), w + gutter
+
+
+def card_mobile(c, gutter):
+    """Compact phone tile, drawn at ~1:1 for a 50% slot of a ~358px column."""
+    w, h = M_SLAB, M_H
+    defs, body = [GRAIN, BLUR("soft", 3)], []
+    d, b = panel("m", 0, 0, w, h, r=16, key=(.15, 0), keyr=1.0, keya=.08)
+    defs.append(d); body.append(b)
+    pad = 14
+    fits(c.get("mtag", c["tag"]), 10, w - 2 * pad - 26, "mono")
+    p, _ = mono(c.get("mtag", c["tag"]), pad, 24, 10, INK3)
+    body.append(p)
+    bx, by = w - pad - 10, 20
+    body.append(f'<circle cx="{n(bx)}" cy="{n(by)}" r="10.5" fill="#121212" stroke="#fff" stroke-opacity=".14"/>')
+    p, _ = sans("↗", bx, by + 3.6, 10.5, INK, 500, anchor="middle")
+    body.append(p)
+    p, _ = sans(c["slug"], pad - .5, 60, 20, INK, 600, -0.03)
+    body.append(p)
+    y = 84
+    for line in c["mlines"]:
+        fits(line, 12, w - 2 * pad)
+        p, _ = sans(line, pad, y, 12, INK2, 400)
+        body.append(p)
+        y += 17
+    alt = f'{c["slug"]}: {" ".join(c["lines"])} ({c["tag"]})'
+    return svg(w + gutter, h, "".join(body), "".join(defs), alt)
 
 
 # -------------------------------------------------------------------- pills
@@ -441,12 +473,22 @@ def build():
         "assets/stats-mobile.svg": stats(mobile=True),
     }
     lines = [picture("hero", ALT["hero"]), picture("stats", ALT["stats"])]
+    # Cards: percentage widths that sum to (just under) 100%, and no whitespace
+    # between the two links, so they line up with the hero at every column width.
+    # Phones swap in compact tiles via <picture media>; <a><picture> is kept
+    # intact by GitHub's README renderer (gfm).
+    row = []
     for i, c in enumerate(CARDS):
-        svgtext, cw = card(c, CARD_GUTTER if i == 0 else 0)
+        gut, mgut = (CARD_GUTTER, M_GUTTER) if i == 0 else (0, 0)
+        svgtext, cw = card(c, gut)
         files[f"assets/card-{c['slug']}.svg"] = svgtext
+        files[f"assets/card-{c['slug']}-mobile.svg"] = card_mobile(c, mgut)
+        pct = math.floor(cw / W * 10000) / 100
         alt = f'{c["slug"]}: {" ".join(c["lines"])}'
-        lines.append(f'<a href="{c["url"]}"><img src="assets/card-{c["slug"]}.svg" width="{n(cw)}" '
-                     f'align="top" alt={quoteattr(alt)}></a>' + ("<br>" if i == len(CARDS) - 1 else ""))
+        row.append(f'<a href="{c["url"]}"><picture><source media="(max-width: 600px)" '
+                   f'srcset="assets/card-{c["slug"]}-mobile.svg"><img src="assets/card-{c["slug"]}.svg" '
+                   f'width="{pct}%" align="top" alt={quoteattr(alt)}></picture></a>')
+    lines.append("".join(row) + "<br>")
     for label, url in LINKS:
         slug = label.lower().replace(" ", "-")
         s_, pw = pill(label)
