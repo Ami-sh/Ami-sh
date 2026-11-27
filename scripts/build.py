@@ -5,9 +5,11 @@
     python3 scripts/build.py
 
 Design
-  * The README is a terminal session. One window (title bar, traffic lights)
-    types `intro` and `impact` like a short screen recording, then rests on a
-    blinking cursor. Reduced-motion visitors get the finished frame.
+  * The README is a live terminal. One window (title bar, traffic lights) runs a
+    shell session: it types `intro` at a human rhythm, Enter prints the output at
+    once, a fresh prompt appears, it types `impact`, holds the finished screen,
+    then types `clear` and starts over. The cursor blinks only while idle.
+    Reduced-motion visitors get one run that rests on the finished screen.
   * Beside the text an ASCII planet rises out of the right edge: its surface is
     a stream of backend / infra / agent tokens that turns slowly, with a
     '....::::----++++' ramp trailing off the lit limb.
@@ -20,7 +22,7 @@ Design
 """
 import math
 import os
-import re
+import random
 import sys
 from xml.sax.saxutils import escape, quoteattr
 
@@ -147,49 +149,125 @@ def panel(pid, w, h, r=RAD, glow=(.2, .05)):
     return defs, base, edge
 
 
-# ---------------------------------------------------------------- animation
-# Static attributes always hold the FINAL frame; <set>/<animate> only rewind it.
-# still() strips every animation element, which leaves exactly that final frame.
-def hidden_until(t, inner):
-    return f'<g><set attributeName="opacity" to="0" begin="0s" dur="{t:.3f}s"/>{inner}</g>'
+# ------------------------------------------------------------------ session
+# The terminal is a scripted shell session on one timeline. Every element records
+# when it is on screen and Session.render() turns that into discrete SMIL.
+#   loop: replays forever. The session ends by typing `clear`, which puts the
+#         screen back exactly in its first frame, so the seam is invisible.
+#   once: plays through and rests on the finished frame (prefers-reduced-motion).
+# Static attributes always hold the finished frame, for renderers without SMIL.
+BLINK = .53                     # cursor half-period, like Terminal.app
 
 
-def typed(cid, inner, x, y, size, nchars, step, t0, dt, defs):
-    """Reveal `inner` (one line of mono text at baseline y) one character at a time."""
-    top, hgt = y - size * 1.05, size * 1.45
-    full = nchars * step + 6
-    vals = ";".join(n(2 + i * step) for i in range(1, nchars)) + f";{n(full)}"
-    defs.append(f'<clipPath id="{cid}"><rect x="{n(x - 2)}" y="{n(top)}" width="{n(full)}" height="{n(hgt)}">'
-                f'<set attributeName="width" to="0" begin="0s" dur="{t0:.3f}s"/>'
-                f'<animate attributeName="width" values="{vals}" begin="{t0:.3f}s" dur="{nchars * dt:.3f}s" '
-                f'calcMode="discrete" fill="freeze"/></rect></clipPath>')
-    return f'<g clip-path="url(#{cid})">{inner}</g>'
+def _kt(t, D):
+    return "0" if t == 0 else f"{t / D:.5f}".rstrip("0").rstrip(".")
 
 
-def cursor(x, y, size, on=None, moves=None, blink_from=None, final=False):
-    """Block cursor. on=(t0, t1): visible only then (hidden in the final frame).
-    moves=(t0, dt, step, k): steps right k cells. blink_from: blink, then rest solid."""
-    cw, chh = adv(size) * .98, size * 1.2
-    a = []
-    if on:
-        a.append(f'<set attributeName="opacity" to="1" begin="{on[0]:.3f}s" dur="{on[1] - on[0]:.3f}s"/>')
-    if moves:
-        t0, dt, step, k = moves
-        xs = ";".join(n(x + i * step) for i in range(1, k + 1))
-        a.append(f'<animate attributeName="x" values="{xs}" begin="{t0:.3f}s" dur="{k * dt:.3f}s" '
-                 f'calcMode="discrete" fill="freeze"/>')
-    if blink_from is not None:
-        a.append(f'<set attributeName="opacity" to="0" begin="0s" dur="{blink_from:.3f}s"/>')
-        a.append(f'<animate attributeName="fill-opacity" values="1;0" dur="1.06s" begin="{blink_from:.3f}s" '
-                 f'calcMode="discrete" repeatCount="14"/>')
-    op = "" if final else ' opacity="0"'
-    return (f'<rect x="{n(x)}" y="{n(y - size * .92)}" width="{n(cw)}" height="{n(chh)}" rx="1" '
-            f'fill="{ACC}"{op}>{"".join(a)}</rect>')
+def disc(attr, ev, D, mode):
+    """Discrete animation of one attribute from [(t, value)] events."""
+    vals = {}
+    for t, v in sorted(ev, key=lambda e: e[0]):
+        t = round(max(0.0, t), 4)
+        if mode == "loop" and t >= D - 1e-6:
+            continue                    # the loop's t=0 is the same frame
+        vals[t] = v
+    items = sorted(vals.items())
+    if not items or items[0][0] != 0:
+        raise SystemExit(f"{attr}: timeline must start at t=0")
+    timing = 'repeatCount="indefinite"' if mode == "loop" else 'fill="freeze"'
+    return (f'<animate attributeName="{attr}" values="{";".join(v for _, v in items)}" '
+            f'keyTimes="{";".join(_kt(t, D) for t, _ in items)}" calcMode="discrete" '
+            f'dur="{D:.3f}s" {timing}/>')
 
 
-def still(svgtext):
-    """The finished frame, for prefers-reduced-motion."""
-    return re.sub(r"<(?:set|animate|animateTransform)\b[^>]*/>", "", svgtext)
+class Session:
+    def __init__(self, seed=7):
+        self.t = 0.0
+        self.items = []             # [svg, on, off]
+        self.typed = []             # one per typed command
+        self.cur = []               # (t, x, y, visible)
+        self.cx = self.cy = 0.0
+        self.rnd = random.Random(seed)
+        self.marks = {}             # named moments, for tooling
+
+    def mark(self, name):
+        self.marks[name] = round(self.t, 4)
+
+    def home(self, x, y):
+        self.cx, self.cy = x, y
+        self.cur.append((self.t, x, y, True))
+
+    def idle(self, d):
+        """The cursor blinks where it is (it is solid right after any keypress)."""
+        end, t, on = self.t + d, self.t, True
+        while t + BLINK < end - 1e-6:
+            t += BLINK
+            on = not on
+            self.cur.append((t, self.cx, self.cy, on))
+        self.t = end
+
+    def type(self, cid, inner, x, y, size, step, text):
+        """Keystrokes at an uneven, human rhythm; each one moves the cursor a cell."""
+        top, hgt = y - size * 1.05, size * 1.45
+        full = len(text) * step + 6
+        keys = []
+        for i in range(len(text)):
+            if i:
+                self.t += self.rnd.uniform(.06, .17)
+            keys.append((self.t, 2 + (i + 1) * step if i < len(text) - 1 else full))
+            self.cur.append((self.t, x + (i + 1) * step, y, True))
+        self.typed.append(dict(cid=cid, inner=inner, rect=(x - 2, top, full, hgt), keys=keys, off=None))
+        self.cx, self.cy = x + len(text) * step, y
+
+    def enter(self, pause=.32):
+        """Return. The cursor leaves while the program prints."""
+        self.t += pause
+        self.cur.append((self.t, self.cx, self.cy, False))
+
+    def print(self, svg_, gap=.03):
+        self.t += gap
+        self.items.append([svg_, self.t, None])
+
+    def prompt(self, svg_, x, y, gap=.05):
+        self.t += gap
+        self.items.append([svg_, self.t, None])
+        self.home(x, y)
+
+    def clear(self, x, y):
+        """`clear`: every line goes and the prompt is back at the top."""
+        for it in self.items:
+            if it[2] is None:
+                it[2] = self.t
+        for tp in self.typed:
+            if tp["off"] is None:
+                tp["off"] = self.t
+        self.home(x, y)
+
+    def rest(self):
+        """End of a one-shot run: the cursor settles, solid."""
+        self.cur.append((self.t, self.cx, self.cy, True))
+
+    def render(self, mode, D, size, base, defs):
+        body = []
+        for svg_, on, off in self.items:
+            ev = [(0, "0"), (on, "1")] + ([(off, "0")] if off is not None else [])
+            body.append(f'<g>{disc("opacity", ev, D, mode)}{svg_}</g>')
+        for tp in self.typed:
+            x, top, full, hgt = tp["rect"]
+            ev = ([(0, "0")] + [(t, n(wd)) for t, wd in tp["keys"]]
+                  + ([(tp["off"], "0")] if tp["off"] is not None else []))
+            defs.append(f'<clipPath id="{tp["cid"]}"><rect x="{n(x)}" y="{n(top)}" width="{n(full)}" '
+                        f'height="{n(hgt)}">{disc("width", ev, D, mode)}</rect></clipPath>')
+            body.append(f'<g clip-path="url(#{tp["cid"]})">{tp["inner"]}</g>')
+        cw, chh, lift = adv(size) * .98, size * 1.2, size * .92
+        bx, by = base
+        body.append(
+            f'<rect x="{n(bx)}" y="{n(by - lift)}" width="{n(cw)}" height="{n(chh)}" rx="1" fill="{ACC}">'
+            + disc("x", [(t, n(x)) for t, x, _, _ in self.cur], D, mode)
+            + disc("y", [(t, n(y - lift)) for t, _, y, _ in self.cur], D, mode)
+            + disc("opacity", [(t, "1" if v else "0") for t, _, _, v in self.cur], D, mode)
+            + "</rect>")
+        return "".join(body)
 
 
 # --------------------------------------------------------------------- hero
@@ -209,7 +287,11 @@ def prompt_parts(cmd):
     return [(USER, ACC), (":", INK3), ("~", INK2), ("$ ", INK3), (cmd, INK)]
 
 
-def hero(compact=False):
+TIMELINES = {}                  # (compact, mode) -> named moments, for tooling
+HOLD = 8.0                      # loop: seconds the finished screen stays up before `clear`
+
+
+def hero(compact=False, mode="loop"):
     if compact:
         w, bar, pad, tsize = MW, 30, 18, 10.5
         ps, ss, ls_, st_lead = 11, 20, 10.5, 26
@@ -221,66 +303,54 @@ def hero(compact=False):
     s_tr = -0.04
     defs, body = [GRAIN], []
     pstep = adv(ps)
+    sh = Session()
 
-    # ---- timeline (seconds)
-    t_type1, cdt = .6, .085
-    t_out1 = t_type1 + 5 * cdt + .25
-    fdt = .018
-    t_lines = []
-    t = t_out1
+    # $ intro
+    y1 = bar + (34 if compact else 44)
+    p1, x1 = runs(prompt_parts(""), pad, y1, ps)
+    body.append(p1)                              # the top prompt never leaves the screen
+    sh.home(x1, y1)
+    sh.idle(1.0)
+    sh.mark("type1")
+    sh.type("ty1", mono("intro", x1, y1, ps, INK)[0], x1, y1, ps, pstep, "intro")
+    sh.mark("typed1")
+    sh.enter()
+    sh.mark("enter1")
+    y = y1 + (38 if compact else 52)
     for line in intro:
-        t_lines.append(t)
-        t += len(line) * fdt + .05
-    t_stack = t + .08
-    t_p2 = t_stack + .4
-    t_type2 = t_p2 + .3
-    t_out2 = t_type2 + 6 * cdt + .2
-    t_p3 = t_out2 + 6 * .09 + .25
-    t_planet, t_tick = t_out1 + .05, t_stack + .1
-
-    # ---- text layout
-    y = bar + (34 if compact else 44)
-    p1, x1 = runs(prompt_parts(""), pad, y, ps)
-    cmd1, _ = mono("intro", x1, y, ps, INK)
-    body.append(p1)
-    body.append(typed("ty1", cmd1, x1, y, ps, 5, pstep, t_type1, cdt, defs))
-    body.append(cursor(x1, y, ps, on=(0, t_out1), moves=(t_type1, cdt, pstep, 5)))
-    y += 38 if compact else 52
-    sstep = adv(ss, s_tr)
-    for i, line in enumerate(intro):
         fits(line, ss, (w * .78 if compact else 520), "mono", 500, s_tr)
-        p, _ = mono(line, pad - 1, y, ss, INK, 500, s_tr)
-        body.append(typed(f"st{i}", p, pad - 1, y, ss, len(line), sstep, t_lines[i], fdt, defs))
+        sh.print(mono(line, pad - 1, y, ss, INK, 500, s_tr)[0], gap=.025)
         y += st_lead
     y += (28 if compact else 34) - st_lead
-    for k, line in enumerate(stack):
+    for line in stack:
         fits(line, ls_, w - 2 * pad)
-        body.append(hidden_until(t_stack, mono(line, pad, y, ls_, INK3)[0]))
+        sh.print(mono(line, pad, y, ls_, INK3)[0], gap=.025)
         y += 16
     y += (38 if compact else 50) - 16
-    p2, x2 = runs(prompt_parts(""), pad, y, ps)
-    cmd2, _ = mono("impact", x2, y, ps, INK)
-    body.append(hidden_until(t_p2, p2))
-    body.append(typed("ty2", cmd2, x2, y, ps, 6, pstep, t_type2, cdt, defs))
-    body.append(cursor(x2, y, ps, on=(t_p2, t_out2), moves=(t_type2, cdt, pstep, 6)))
 
-    # impact as a `tree` listing
-    k_ = 0
+    # $ impact
+    p2, x2 = runs(prompt_parts(""), pad, y, ps)
+    sh.prompt(p2, x2, y)
+    sh.mark("prompt2")
+    sh.idle(1.4)
+    sh.mark("type2")
+    sh.type("ty2", mono("impact", x2, y, ps, INK)[0], x2, y, ps, pstep, "impact")
+    sh.mark("typed2")
+    sh.enter()
+    sh.mark("enter2")
     if compact:
         y += 26
         for i, (key, fig, desc, ctx) in enumerate(IMPACT):
             last = i == len(IMPACT) - 1
-            br = "└─ " if last else "├─ "
-            a, xa = runs([(br, INK4), (key + "  ", INK3)], pad, y, 11.5)
+            a, xa = runs([("└─ " if last else "├─ ", INK4), (key + "  ", INK3)], pad, y, 11.5)
             b, _ = mono(fig, xa, y, 11.5, INK, 500)
-            body.append(hidden_until(t_out2 + k_ * .09, a + b)); k_ += 1
+            sh.print(a + b, gap=.04)
             ind = pad + adv(11.5) * 3
-            bar_ = "" if last else mono("│", pad, y + 16, 11.5, INK4)[0]
             fits(desc, 11, w - ind - pad); fits(ctx, 11, w - ind - pad)
-            body.append(hidden_until(t_out2 + k_ * .09,
-                                     bar_ + mono(desc, ind, y + 16, 11, INK2)[0]
-                                     + ("" if last else mono("│", pad, y + 31, 11.5, INK4)[0])
-                                     + mono(ctx, ind, y + 31, 11, INK3)[0])); k_ += 1
+            pipe1 = "" if last else mono("│", pad, y + 16, 11.5, INK4)[0]
+            pipe2 = "" if last else mono("│", pad, y + 31, 11.5, INK4)[0]
+            sh.print(pipe1 + mono(desc, ind, y + 16, 11, INK2)[0], gap=.04)
+            sh.print(pipe2 + mono(ctx, ind, y + 31, 11, INK3)[0], gap=.04)
             y += 55
         y += 34 - 55 + 31
     else:
@@ -294,18 +364,35 @@ def hero(compact=False):
             b, _ = mono(fig, col_fig, y, isz, INK, 500)
             c, _ = mono(desc, col_desc, y, isz, INK2)
             fits(desc, isz, 560 - col_desc)
-            body.append(hidden_until(t_out2 + k_ * .09, a + b + c)); k_ += 1
+            sh.print(a + b + c, gap=.04)
             pipe = "" if last else mono("│", pad, y + 19, isz, INK4)[0]
             fits(ctx, 12.5, 560 - col_desc)
-            body.append(hidden_until(t_out2 + k_ * .09, pipe + mono(ctx, col_desc, y + 19, 12.5, INK3)[0])); k_ += 1
+            sh.print(pipe + mono(ctx, col_desc, y + 19, 12.5, INK3)[0], gap=.04)
             y += 46
         y += 42 - 46 + 19
+
+    # final prompt: hold, then `clear` and go round again (or rest, for reduced motion)
     p3, x3 = runs(prompt_parts(""), pad, y, ps)
-    body.append(hidden_until(t_p3, p3))
-    body.append(cursor(x3, y, ps, blink_from=t_p3, final=True))
+    sh.prompt(p3, x3, y)
+    sh.mark("prompt3")
+    if mode == "loop":
+        sh.idle(HOLD)
+        sh.mark("type3")
+        sh.type("ty3", mono("clear", x3, y, ps, INK)[0], x3, y, ps, pstep, "clear")
+        sh.mark("typed3")
+        sh.enter(.3)
+        sh.clear(x1, y1)
+        D = sh.t
+    else:
+        sh.idle(3.2)
+        sh.rest()
+        D = sh.t + .05
+    sh.marks["D"] = round(D, 4)
+    TIMELINES[(compact, mode)] = sh.marks
+    body.append(sh.render(mode, D, ps, (x3, y), defs))
     h = round(y + (22 if compact else 30))
 
-    # ---- planet (behind the text, clipped to the window body)
+    # ---- planet: the terminal's backdrop (it turns slowly in the looping version)
     if compact:      # a quarter planet peeking out of the top-right corner
         R, cx, cy, gx0, sx0 = 104, w + 8, bar - 14, w - 140, w
         cw, chh, fsz, tail = 4.8, 9.6, 7.8, 58
@@ -321,7 +408,7 @@ def hero(compact=False):
     step, P = .2, pl.P
     tick = (f'<animateTransform attributeName="transform" type="translate" '
             f'values="{";".join(n(-i * cw) for i in range(P))}" calcMode="discrete" '
-            f'dur="{P * step:.2f}s" begin="{t_tick:.3f}s" repeatCount="6" fill="freeze"/>')
+            f'dur="{P * step:.2f}s" repeatCount="indefinite"/>') if mode == "loop" else ""
     defs.append(f'<radialGradient id="halo" cx="{n(cx)}" cy="{n(cy)}" r="{n(R * 1.24)}" gradientUnits="userSpaceOnUse">'
                 f'<stop offset=".74" stop-color="#fff" stop-opacity="0"/>'
                 f'<stop offset=".805" stop-color="#fff" stop-opacity=".055"/>'
@@ -331,9 +418,7 @@ def hero(compact=False):
     surface = (f'<g clip-path="url(#pc)" mask="url(#pm)"><g fill-opacity=".84">{tick}'
                + "".join(PL.row_text(xs, yb, txt) for xs, yb, txt in rows) + '</g></g>')
     planet = (f'<g clip-path="url(#wc)" fill="#fff" font-family="{PL.FONT}" font-size="{fsz}" '
-              f'xml:space="preserve"><set attributeName="opacity" to="0" begin="0s" dur="{t_planet:.3f}s"/>'
-              f'<animate attributeName="opacity" values="0;1" begin="{t_planet:.3f}s" dur="1.1s"/>'
-              f'{halo}{static}{surface}</g>')
+              f'xml:space="preserve">{halo}{static}{surface}</g>')
 
     cd, cb, edge = window_chrome(w, h, bar, f"{USER}: ~", tsize)
     defs.append(cd)
@@ -412,11 +497,10 @@ def pct(w):
 def build():
     files = {}
     for compact, suffix in ((False, ""), (True, "-compact")):
-        h = hero(compact)
-        files[f"assets/terminal{suffix}.svg"] = h
-        files[f"assets/terminal{suffix}-still.svg"] = still(h)
-    lines = [f'<picture><source media="{RM} and {MQ}" srcset="assets/terminal-compact-still.svg" width="{M_CAP}">'
-             f'<source media="{RM}" srcset="assets/terminal-still.svg">'
+        files[f"assets/terminal{suffix}.svg"] = hero(compact, "loop")
+        files[f"assets/terminal{suffix}-once.svg"] = hero(compact, "once")
+    lines = [f'<picture><source media="{RM} and {MQ}" srcset="assets/terminal-compact-once.svg" width="{M_CAP}">'
+             f'<source media="{RM}" srcset="assets/terminal-once.svg">'
              f'<source media="{MQ}" srcset="assets/terminal-compact.svg" width="{M_CAP}">'
              f'<img src="assets/terminal.svg" width="{W}" align="top" alt={quoteattr(ALT)}></picture><br>']
 
