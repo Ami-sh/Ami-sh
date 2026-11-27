@@ -5,78 +5,84 @@
     python3 scripts/build.py
 
 Design system
-  * Surfaces: opaque matte-black panels (#0A0A0A) with a soft top-left key
-    light, fine film grain, a lit top edge and a hairline border. Opaque art
-    looks intentional on GitHub's dark AND light themes, so no theme swap.
-  * Type: Geist Sans + Geist Mono (SIL OFL, in ../fonts), outlined to paths by
-    typeset.py so every visitor sees exactly this typography.
-  * Greys only. One slow, quiet motion (orbits, a pulse, a cursor).
-  * Phones (<= 600px) get stacked variants of the hero and stats via
-    <picture media>; project cards are fixed-width so they stack by themselves.
+  * Surfaces: opaque matte-black panels (#0A0A0A) with a soft key light, fine
+    film grain, a lit top edge and a hairline border, one radius (18) for every
+    panel. Opaque art reads as intentional on GitHub's dark, dimmed AND light
+    themes, so nothing swaps per theme.
+  * Type: Geist Sans + Geist Mono (SIL OFL, ../fonts), outlined to paths with
+    real kerning by typeset.py, so every visitor sees exactly this typography.
+  * The hero is the name itself; its period is a breathing white LED — the only
+    motion on the page (it settles after ~50s; reduced-motion gets a still).
+  * Greys only, three text levels, all small text >= 4.5:1 on the panels.
+  * Grid: everything is 847px (GitHub's profile column at viewports >= 1280px)
+    with 12px gutters. Cards and keys use % widths, so rows stay aligned at
+    any desktop width. Viewports <= 1011px get compact art (drawn for a ~300px
+    phone column, capped at 400px) with stacked cards.
 """
 import math
 import os
+import re
 import sys
-from xml.sax.saxutils import quoteattr
+from xml.sax.saxutils import escape, quoteattr
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import typeset as T  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-W = 846          # desktop width of every full-width piece: GitHub's profile README
-                 # column is 847px at any viewport >= ~1280px (measured on github.com)
-GAP = 12         # gutter between panels, everywhere (horizontal AND vertical)
+W = 847                         # desktop width of every row
+GAP = 12                        # one gutter, horizontal and vertical
+MW, M_CAP = 340, 400            # compact art: drawn width, max display width
+MQ = "(max-width: 1011px)"      # GitHub's README column is <= ~640px below 1012px
+PQ = "(max-width: 600px)"       # phones (link keys only)
+RM = "(prefers-reduced-motion: reduce)"
 
 # ------------------------------------------------------------------ palette
 BG = "#0A0A0A"
-INK = "#F0F0F0"
-INK2 = "#9C9C9C"
-INK3 = "#6E6E6E"
-INK4 = "#454545"
-INK5 = "#2A2A2A"
+INK = "#F0F0F0"                 # 17:1
+INK2 = "#ADADAD"                # 8.8:1  body
+INK3 = "#858585"                # 5.4:1  labels / function calls
+INK4 = "#4A4A4A"                # decorative separators only
 
 # ------------------------------------------------------------------ content
 INTRO = ["I build scalable backends,", "infra and agentic systems."]
 STACK = ["PYTHON", "GO", "KUBERNETES", "KAFKA", "LANGGRAPH"]
 
 STATS = [
-    dict(call="backends()", spark="rise",
+    dict(call="backends()",
          big=[("10", "big"), ("→", "arrow"), ("800", "big")],
-         lines=["users in a week, zero downtime", "backend of an LLM markets agent"]),
-    dict(call="infra()", spark="fall",
-         big=[("90%", "big"), ("+", "suffix")],
-         lines=["cut in mean time to first response", "self-healing k8s · 75+ services"]),
-    dict(call="agents()", spark="step",
-         big=[("up to ", "prefix"), ("+10", "big"), (" pp", "suffix")],
-         lines=["Qwen · AndroidWorld, MobileWorld", "via my harness's trajectories"]),
+         lines=["users in a week, zero downtime", "AI stock-analysis agent backend"]),
+    dict(call="infra()",
+         big=[("−", "sign"), ("90%", "big")],
+         lines=["mean time to first response", "self-healing k8s · 75+ services"]),
+    dict(call="agents()",
+         big=[("+", "sign"), ("10", "big"), ("pp", "unit")],
+         lines=["Qwen · AndroidWorld, MobileWorld", "peak, via my harness's trajectories"]),
 ]
 
 CARDS = [
     dict(slug="pr-reviewer", url="https://github.com/Ami-sh/pr-reviewer",
          lines=["Independent one-shot LLM review for any PR,", "with an adversarial verifier on every finding."],
-         mlines=["One-shot LLM review for", "any PR with an adversarial", "verifier on each finding."],
          tag="python · claude"),
     dict(slug="agentami", url="https://github.com/Ami-sh/agentami",
          lines=["A LangGraph agent for when your AI has too", "many tools: picks the top-k for every turn."],
-         mlines=["A LangGraph agent for AIs", "with too many tools: picks", "the top-k on every turn."],
-         tag="pip install agentami", mtag="python · pypi"),
+         tag="pip install agentami"),
 ]
 
 LINKS = [
-    ("LeetCode", "https://leetcode.com/u/f20191386/"),
-    ("Stack Overflow", "https://stackoverflow.com/users/16179688/amish-gupta"),
-    ("Physics SE", "https://physics.stackexchange.com/users/274874/amish-gupta"),
-    ("Math SE", "https://math.stackexchange.com/users/824283/amish-gupta"),
+    ("LeetCode", "https://leetcode.com/u/f20191386/", "LeetCode profile"),
+    ("Stack Overflow", "https://stackoverflow.com/users/16179688/amish-gupta", "Stack Overflow profile"),
+    ("Physics SE", "https://physics.stackexchange.com/users/274874/amish-gupta", "Physics Stack Exchange profile"),
+    ("Math SE", "https://math.stackexchange.com/users/824283/amish-gupta", "Math Stack Exchange profile"),
 ]
 
 ALT = dict(
     hero="ami.sh — intro(): I build scalable backends, infra and agentic systems. "
          "Python, Go, Kubernetes, Kafka, LangGraph.",
-    stats="backends(): 10 → 800 users in a week with zero downtime, the backend of an LLM "
-          "markets agent. infra(): mean time to first response cut by over 90%, a "
-          "self-healing Kubernetes operator across 75+ services. agents(): up to +10 "
-          "percentage points for open-source Qwen models on AndroidWorld / MobileWorld, "
-          "trained on trajectories from my agent harness.",
+    stats="backends(): from 10 to 800 users in a week with zero downtime — the backend of an "
+          "AI stock-analysis agent. infra(): mean time to first response cut by over 90% with a "
+          "self-healing Kubernetes operator across 75+ services. agents(): up to +10 percentage "
+          "points for open-source Qwen models on AndroidWorld and MobileWorld, trained on "
+          "trajectories from my agent harness.",
 )
 
 
@@ -87,13 +93,19 @@ def n(v):
 
 
 def svg(w, h, body, defs="", label="", pad_bottom=GAP):
+    """Every piece carries its own bottom gutter, so stacked rows get exactly GAP."""
     h = h + pad_bottom
     return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{n(w)}" height="{n(h)}" '
             f'viewBox="0 0 {n(w)} {n(h)}" role="img" aria-label={quoteattr(label)}>'
-            f'<title>{label}</title><defs>{defs}</defs>{body}</svg>\n')
+            f'<title>{escape(label)}</title><defs>{defs}</defs>{body}</svg>\n')
 
 
-def panel(pid, x, y, w, h, r=20, key=(0.18, 0.0), keyr=1.0, keya=0.085):
+GRAIN = ('<filter id="grain" x="0" y="0" width="100%" height="100%">'
+         '<feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="11" stitchTiles="stitch"/>'
+         '<feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2.2 0 0 0 -1.05"/></filter>')
+
+
+def panel(pid, x, y, w, h, r=18, key=(0.18, 0.0), keyr=1.0, keya=0.085):
     """Matte panel: base, key light, grain, lit top edge, hairline border."""
     kx, ky = x + key[0] * w, y + key[1] * h
     kr = keyr * max(w, h) * 0.75
@@ -122,12 +134,6 @@ def panel(pid, x, y, w, h, r=20, key=(0.18, 0.0), keyr=1.0, keya=0.085):
     return defs, body
 
 
-GRAIN = ('<filter id="grain" x="0" y="0" width="100%" height="100%">'
-         '<feTurbulence type="fractalNoise" baseFrequency=".85" numOctaves="2" seed="11" stitchTiles="stitch"/>'
-         '<feColorMatrix values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  2.2 0 0 0 -1.05"/></filter>')
-BLUR = lambda i, s: f'<filter id="{i}" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="{s}"/></filter>'  # noqa: E731
-
-
 def vgrad(gid, y1, y2, top="#FFFFFF", bottom="#B0B0B0"):
     return (f'<linearGradient id="{gid}" x1="0" y1="{n(y1)}" x2="0" y2="{n(y2)}" gradientUnits="userSpaceOnUse">'
             f'<stop offset="0" stop-color="{top}"/><stop offset="1" stop-color="{bottom}"/></linearGradient>')
@@ -147,36 +153,7 @@ def sans(s, x, y, size, fill, wght=400, tracking=0.0, anchor="start", extra=""):
     return T.text(s, x, y, size, "sans", wght, fill, tracking, anchor, extra)
 
 
-def status(x, y):
-    """Pulsing 'live' dot + path label."""
-    dot = (f'<circle cx="{n(x)}" cy="{n(y)}" r="7" fill="none" stroke="#fff" stroke-opacity=".5">'
-           '<animate attributeName="r" values="3;10" dur="2.6s" repeatCount="indefinite"/>'
-           '<animate attributeName="stroke-opacity" values=".45;0" dur="2.6s" repeatCount="indefinite"/></circle>'
-           f'<circle cx="{n(x)}" cy="{n(y)}" r="3" fill="{INK}"/>')
-    label, _ = mono("~/ami.sh", x + 12, y + 4, 12, INK3, tracking=.02)
-    return dot + label
-
-
-def wordmark(x, y, size):
-    """'ami' lit, '.sh' recessed; returns (defs, body, width)."""
-    f = T.face("sans", 600)
-    tr = -0.045
-    p1, w1 = sans("ami", x, y, size, "url(#wm)", 600, tr)
-    gap = f.kern(f.gname("i"), f.gname(".")) * size / f.upm + tr * size
-    p2, w2 = sans(".sh", x + w1 + gap, y, size, "#4D4D4D", 600, tr)
-    glow, _ = sans("ami", x, y, size, "#fff", 600, tr, extra=' filter="url(#bloom)" opacity=".2"')
-    defs = vgrad("wm", y - size * .74, y + size * .02, "#FFFFFF", "#ABABAB") + BLUR("bloom", size * .14)
-    return defs, glow + p1 + p2, w1 + gap + w2
-
-
-def cursor(x, y, size):
-    h, w = size * .92, size * .42
-    return (f'<rect x="{n(x)}" y="{n(y - h * .82)}" width="{n(w)}" height="{n(h)}" rx="1.5" fill="{INK}">'
-            '<animate attributeName="opacity" values="1;1;0;0" keyTimes="0;.5;.5;1" dur="1.15s" '
-            'repeatCount="indefinite"/></rect>')
-
-
-def stack_row(x, y, size=11, items=STACK, maxw=None):
+def stack_row(x, y, size, items):
     out, cx = [], x
     for i, it in enumerate(items):
         if i:
@@ -186,315 +163,257 @@ def stack_row(x, y, size=11, items=STACK, maxw=None):
         p, w = mono(it, cx, y, size, INK3, tracking=.16)
         out.append(p)
         cx += w
-    return "".join(out), cx - x
-
-
-def orbit(cx, cy, radii, speeds, scale=1.0):
-    """Concentric orbits with nodes; slow rotation; glowing core."""
-    s = scale
-    parts = []
-    # rings
-    styles = ['stroke-opacity=".10"', 'stroke-opacity=".16" stroke-dasharray="1.2 5.5" stroke-linecap="round"',
-              'stroke-opacity=".07"']
-    for r, st in zip(radii, styles):
-        parts.append(f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(r)}" fill="none" stroke="#fff" {st}/>')
-    nodes = [
-        [(28, 3.4 * s, "lit"), (208, 2.4 * s, "#8A8A8A")],
-        [(84, 3.6 * s, "box"), (204, 2.2 * s, "#6A6A6A"), (318, 3.0 * s, "lit")],
-        [(146, 2.6 * s, "#5C5C5C"), (262, 2.0 * s, "#7A7A7A"), (338, 2.4 * s, "#4A4A4A")],
-    ]
-    for (r, dur, ring), direction in zip(zip(radii, speeds, nodes), (1, -1, 1)):
-        g = []
-        for ang, rad, kind in ring:
-            a = math.radians(ang)
-            x, y = cx + r * math.cos(a), cy + r * math.sin(a)
-            if kind == "lit":
-                g.append(f'<circle cx="{n(x)}" cy="{n(y)}" r="{n(rad * 2.4)}" fill="#fff" opacity=".35" filter="url(#soft)"/>'
-                         f'<circle cx="{n(x)}" cy="{n(y)}" r="{n(rad)}" fill="#fff"/>')
-            elif kind == "box":
-                b = rad * 1.9
-                g.append(f'<rect x="{n(x - b / 2)}" y="{n(y - b / 2)}" width="{n(b)}" height="{n(b)}" rx="1.5" '
-                         f'fill="{BG}" stroke="#BDBDBD" stroke-width="1.1"/>')
-            else:
-                g.append(f'<circle cx="{n(x)}" cy="{n(y)}" r="{n(rad)}" fill="{kind}"/>')
-        frm, to = (0, 360) if direction > 0 else (360, 0)
-        parts.append(f'<g>{"".join(g)}<animateTransform attributeName="transform" type="rotate" '
-                     f'from="{frm} {n(cx)} {n(cy)}" to="{to} {n(cx)} {n(cy)}" dur="{dur}s" '
-                     'repeatCount="indefinite"/></g>')
-    # core
-    parts.append(f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(16 * s)}" fill="#fff" opacity=".22" filter="url(#soft)"/>'
-                 f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(9 * s)}" fill="none" stroke="#fff" stroke-opacity=".4">'
-                 f'<animate attributeName="r" values="{n(6 * s)};{n(30 * s)}" dur="3.2s" repeatCount="indefinite"/>'
-                 '<animate attributeName="stroke-opacity" values=".4;0" dur="3.2s" repeatCount="indefinite"/></circle>'
-                 f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(4.6 * s)}" fill="#fff"/>')
-    return "".join(parts)
-
-
-def dots(pid, x, y, w, h, cx, cy, r, step=16):
-    """Dot grid that fades out radially from (cx, cy)."""
-    defs = (f'<pattern id="{pid}p" x="{n(x)}" y="{n(y)}" width="{step}" height="{step}" patternUnits="userSpaceOnUse">'
-            f'<circle cx="{step / 2}" cy="{step / 2}" r=".8" fill="#fff"/></pattern>'
-            f'<radialGradient id="{pid}g" cx="{n(cx)}" cy="{n(cy)}" r="{n(r)}" gradientUnits="userSpaceOnUse">'
-            '<stop offset="0" stop-color="#fff" stop-opacity="1"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>'
-            f'<mask id="{pid}m"><rect x="{n(x)}" y="{n(y)}" width="{n(w)}" height="{n(h)}" fill="url(#{pid}g)"/></mask>')
-    body = (f'<rect x="{n(x)}" y="{n(y)}" width="{n(w)}" height="{n(h)}" fill="url(#{pid}p)" '
-            f'mask="url(#{pid}m)" opacity=".11"/>')
-    return defs, body
+    return "".join(out)
 
 
 # --------------------------------------------------------------------- hero
-def hero(mobile=False):
-    if mobile:
-        w, h = 400, 540
-        wm_size, wm_y, pad = 86, 168, 26
-        orb = (300, 468, (44, 84, 128), .85)
+WM_WGHT, WM_TR = 500, -0.055        # wordmark weight / tracking (em)
+LED_DUR, LED_REPEAT = 4.8, 10       # one slow breath, ~50s, then it rests lit
+
+
+def _ink(face, ch):
+    """Glyph ink box (xmin, ymin, xmax, ymax) in font units."""
+    from fontTools.pens.boundsPen import BoundsPen
+    bp = BoundsPen(face.glyphs)
+    face.glyphs[face.gname(ch)].draw(bp)
+    return bp.bounds
+
+
+def wordmark(x, baseline, size):
+    """'ami.sh' whose ink starts exactly at x: 'ami' top-lit, 'sh' recessed, and the
+    period is the page's one light source — a breathing white LED.
+    Returns (defs, body, ink_width)."""
+    f = T.face("sans", WM_WGHT)
+    sc = size / f.upm
+    lay, _ = f.layout("ami.sh", size, WM_TR)
+    x0 = x - _ink(f, "a")[0] * sc
+    runs = {"ami": "", ".": "", "sh": ""}
+    for (_, off), ch in zip(lay, "ami.sh"):
+        runs["ami" if ch in "ami" else "." if ch == "." else "sh"] += f.d(ch, x0 + off, baseline, size)
+    ink_w = x0 + lay[-1][1] + _ink(f, "h")[2] * sc - x
+    b = _ink(f, ".")
+    dcx = x0 + lay[3][1] + (b[0] + b[2]) / 2 * sc
+    dcy = baseline - (b[1] + b[3]) / 2 * sc
+    top = baseline - .72 * size
+    breathe = (f'dur="{LED_DUR}s" calcMode="spline" keyTimes="0;.5;1" '
+               f'keySplines=".45 0 .55 1;.45 0 .55 1" repeatCount="{LED_REPEAT}" fill="freeze"')
+    defs = (vgrad("wmA", top, baseline, "#E6E6E6", "#5C5C5C")
+            + vgrad("wmS", top, baseline, "#474747", "#2A2A2A")
+            + '<filter id="ledb" x="-200%" y="-200%" width="500%" height="500%">'
+              f'<feGaussianBlur stdDeviation="{n(size * .05)}"/></filter>'
+            + f'<radialGradient id="leds" cx="{n(dcx)}" cy="{n(dcy)}" r="{n(size * .62)}" '
+              'gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff" stop-opacity=".16"/>'
+              '<stop offset=".4" stop-color="#fff" stop-opacity=".04"/>'
+              '<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>')
+    body = (f'<path d="{runs["ami"]}" fill="url(#wmA)"/>'
+            f'<path d="{runs["sh"]}" fill="url(#wmS)"/>'
+            f'<circle cx="{n(dcx)}" cy="{n(dcy)}" r="{n(size * .62)}" fill="url(#leds)">'
+            f'<animate attributeName="opacity" values="1;.3;1" {breathe}/></circle>'
+            f'<path d="{runs["."]}" fill="#fff" filter="url(#ledb)" opacity=".85">'
+            f'<animate attributeName="opacity" values=".85;.2;.85" {breathe}/></path>'
+            f'<path d="{runs["."]}" fill="#fff">'
+            f'<animate attributeName="fill-opacity" values="1;.62;1" {breathe}/></path>')
+    return defs, body, ink_w
+
+
+def hero(compact=False):
+    """Masthead: full-width wordmark, then intro() → statement; stack on the right."""
+    if compact:
+        w, pad, top, call, st, lead = MW, 20, 22, 11.5, 22, 29
     else:
-        w, h = W, 420
-        wm_size, wm_y, pad = 116, 194, 36
-        orb = (W - 166, 208, (64, 120, 182), 1.0)
-    defs, body = [GRAIN, BLUR("soft", 4)], []
-    d, b = panel("h", 0, 0, w, h, r=22, key=(.2, 0), keyr=1.1, keya=.095)
-    defs.append(d); body.append(b)
-    ocx, ocy, radii, sc = orb
-    # second, very soft light behind the orbit
-    defs.append(f'<radialGradient id="ol" cx="{n(ocx)}" cy="{n(ocy)}" r="{n(radii[2] * 1.25)}" gradientUnits="userSpaceOnUse">'
-                '<stop offset="0" stop-color="#fff" stop-opacity=".06"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>')
-    dd, db = dots("hd", 0, 0, w, h, ocx, ocy, radii[2] * 1.35)
-    defs.append(dd)
-    body.append(f'<g clip-path="url(#hc)"><rect width="{w}" height="{h}" fill="url(#ol)"/>{db}'
-                f'{orbit(ocx, ocy, radii, (38, 66, 120), sc)}</g>')
-    body.append(status(pad + 4, pad + 8))
-    d, b, _ = wordmark(pad - 4, wm_y, wm_size)
-    defs.append(d); body.append(b)
-    # intro() → statement
-    ly = wm_y + (44 if mobile else 52)
-    p, lw = mono("intro()", pad, ly, 13, INK3)
-    body.append(p)
-    p, _ = mono("→", pad + lw + 9, ly, 13, INK4)
-    body.append(p)
-    size = 24 if mobile else 27
-    lead = size * 1.32
-    y = ly + size * 1.45
-    for i, line in enumerate(INTRO):
-        p, lw2 = sans(line, pad - 1, y, size, INK, 450, -0.018)
-        body.append(p)
-        if i == len(INTRO) - 1:
-            body.append(cursor(pad - 1 + lw2 + size * .2, y, size))
+        w, pad, top, call, st, lead = W, 38, 40, 12.5, 30, 38.5
+    size = (w - 2 * pad) / wordmark(0, 0, 100)[2] * 100     # ink spans pad .. w - pad
+    base = top + .7186 * size                                # i-dot / h top sits on `top`
+    y0 = base + (40 if compact else 54)                      # intro() baseline
+    p, lw = mono("intro()", pad, y0, call, INK3)
+    a, _ = mono("→", pad + lw + call * .6, y0, call, INK3)
+    body = [p, a]
+    y = y0 + st * 1.42
+    for line in INTRO:
+        fits(line, st, w - 2 * pad, "sans", 450)
+        body.append(sans(line, pad - 1, y, st, INK, 450, -0.02)[0])
         y += lead
-    # stack
-    if mobile:
-        r1, _ = stack_row(pad, y + 6, 10.5, STACK[:3])
-        r2, _ = stack_row(pad, y + 26, 10.5, STACK[3:])
-        body += [r1, r2]
-    else:
-        r, _ = stack_row(pad, h - 38, 11)
-        body.append(r)
-    return svg(w, h, "".join(body), "".join(defs), ALT["hero"])
+    last = y - lead
+    if compact:
+        body += [stack_row(pad, last + 30, 10.5, STACK[:3]), stack_row(pad, last + 48, 10.5, STACK[3:])]
+        h = round(last + 72)
+    else:   # right-aligned column, first/last baselines locked to intro() and the last line
+        step = (last - y0) / (len(STACK) - 1)
+        body += [mono(s, w - pad, y0 + i * step, 11, INK3, tracking=.16, anchor="end")[0]
+                 for i, s in enumerate(STACK)]
+        h = round(last + 7 + pad)
+    d, b = panel("h", 0, 0, w, h, key=(.2, 0), keyr=1.1, keya=.095)
+    wd, wb, _ = wordmark(pad, base, size)
+    return svg(w, h, b + f'<g clip-path="url(#hc)">{wb}</g>' + "".join(body), GRAIN + d + wd, ALT["hero"])
+
+
+def still(svgtext):
+    """Same art without motion (for prefers-reduced-motion)."""
+    return re.sub(r"<animate(?:Transform)?\b[^>]*/>", "", svgtext)
 
 
 # -------------------------------------------------------------------- stats
-def spark(kind, x, y, w, h):
-    pts = {
-        "rise": [(0, .96), (.25, .92), (.5, .82), (.7, .62), (.85, .36), (1, .04)],
-        "fall": [(0, .06), (.18, .14), (.36, .40), (.55, .70), (.75, .86), (1, .93)],
-        "step": [(0, .78), (.42, .78), (.5, .70), (.58, .26), (1, .22)],
-    }[kind]
-    P = [(x + px * w, y + py * h) for px, py in pts]
-    # smooth through points (Catmull-Rom -> cubic)
-    d = f"M{n(P[0][0])} {n(P[0][1])}"
-    for i in range(len(P) - 1):
-        p0 = P[i - 1] if i else P[i]
-        p1, p2 = P[i], P[i + 1]
-        p3 = P[i + 2] if i + 2 < len(P) else p2
-        c1 = (p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6)
-        c2 = (p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6)
-        d += f"C{n(c1[0])} {n(c1[1])} {n(c2[0])} {n(c2[1])} {n(p2[0])} {n(p2[1])}"
-    area = d + f"L{n(x + w)} {n(y + h)}L{n(x)} {n(y + h)}Z"
-    gid = f"sa{kind}"
-    defs = (f'<linearGradient id="{gid}" x1="0" y1="{n(y)}" x2="0" y2="{n(y + h)}" gradientUnits="userSpaceOnUse">'
-            '<stop offset="0" stop-color="#fff" stop-opacity=".14"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>')
-    ex, ey = P[-1]
-    body = (f'<path d="{area}" fill="url(#{gid})"/>'
-            f'<path d="{d}" fill="none" stroke="#A8A8A8" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/>'
-            f'<circle cx="{n(ex)}" cy="{n(ey)}" r="5" fill="#fff" opacity=".25" filter="url(#soft)"/>'
-            f'<circle cx="{n(ex)}" cy="{n(ey)}" r="2.3" fill="#fff"/>')
-    return defs, body
-
-
 def figure(parts, x, y, size):
-    """Big number built from runs: big / arrow / prefix / suffix."""
+    """Big number from runs: big | arrow | sign | unit. All figures share a left edge."""
     out, cx = [], x
     for txt, kind in parts:
         if kind == "big":
             p, w = sans(txt, cx, y, size, "url(#num)", 600, -0.04)
-        elif kind == "arrow":
-            p, w = sans(txt, cx + size * .06, y - size * .02, size * .62, INK3, 400)
+        elif kind == "arrow":    # optically centred on the digits
+            p, w = sans(txt, cx + size * .06, y - size * .1355, size * .62, INK3, 400)
             w += size * .12
-        elif kind == "prefix":
-            p, w = sans(txt, cx, y, size * .34, INK2, 450, 0)
-            w += 0
-        else:  # suffix
-            p, w = sans(txt, cx + size * .02, y, size * .46, INK2, 500, -0.01)
-            w += size * .02
+        elif kind == "sign":     # full-size grey sign, like the grey arrow
+            p, w = sans(txt, cx, y, size, INK3, 400)
+            w += size * .015
+        else:                    # unit
+            p, w = sans(txt, cx + size * .12, y, size * .4, INK2, 450)
+            w += size * .12
         out.append(p)
         cx += w
-    return "".join(out), cx - x
+    return "".join(out)
 
 
-def tile(i, st, x, y, w, h, mobile=False):
-    pid = f"t{i}"
-    d, b = panel(pid, x, y, w, h, r=18, key=(.12, 0), keyr=1.0, keya=.075)
-    defs, body = [d], [b]
+TILE_H = 166
+
+
+def tile(i, st, x, y, w):
+    d, b = panel(f"t{i}", x, y, w, TILE_H, key=(.12, 0), keyr=1.0, keya=.075)
+    body = [b]
     pad = 22
-    p, _ = mono(st["call"], x + pad, y + 34, 12.5, INK3)
-    body.append(p)
-    sw, sh = (84, 26) if mobile else (62, 20)
-    sd, sb = spark(st["spark"], x + w - pad - sw, y + 20, sw, sh)
-    defs.append(sd); body.append(sb)
-    big = 50 if mobile else 46
-    fy = y + (92 if mobile else 92)
-    p, _ = figure(st["big"], x + pad - 2, fy, big)
-    body.append(p)
+    body.append(mono(st["call"], x + pad, y + 34, 13, INK3)[0])
+    fy = y + 92
+    body.append(figure(st["big"], x + pad - 2, fy, 48))
     ly = fy + 30
-    for line in st["lines"]:
-        fits(line, 13, w - 2 * pad)
-        p, lw = sans(line, x + pad, ly, 13, INK2, 400, 0)
-        body.append(p)
-        ly += 19
-    return "".join(defs), "".join(body)
+    for k, line in enumerate(st["lines"]):
+        fits(line, 13.5, w - 2 * pad)
+        body.append(sans(line, x + pad, ly, 13.5, INK2 if k == 0 else INK3, 400)[0])
+        ly += 19.5
+    return d, "".join(body)
 
 
-def stats(mobile=False):
-    defs, body = [GRAIN, BLUR("soft", 3), vgrad("num", 0, 0)], []
-    if mobile:
-        w, th = 400, 158
-        h = 3 * th + 2 * GAP
+def stats(compact=False):
+    defs = [GRAIN, '<linearGradient id="num" x1="0" y1="0" x2="0" y2="1">'
+                   '<stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#A9A9A9"/></linearGradient>']
+    body = []
+    if compact:
+        w, h = MW, 3 * TILE_H + 2 * GAP
         for i, st in enumerate(STATS):
-            d, b = tile(i, st, 0, i * (th + GAP), w, th, True)
+            d, b = tile(i, st, 0, i * (TILE_H + GAP), w)
             defs.append(d); body.append(b)
     else:
-        w, h = W, 166
+        w, h = W, TILE_H
         tw = (W - 2 * GAP) / 3
         for i, st in enumerate(STATS):
-            d, b = tile(i, st, i * (tw + GAP), 0, tw, h)
+            d, b = tile(i, st, i * (tw + GAP), 0, tw)
             defs.append(d); body.append(b)
-    # number gradient spans one tile row; userSpace per tile is approximated
-    # by objectBoundingBox so each numeral gets the same top-lit sheen
-    defs[2] = ('<linearGradient id="num" x1="0" y1="0" x2="0" y2="1">'
-               '<stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#A9A9A9"/></linearGradient>')
     return svg(w, h, "".join(body), "".join(defs), ALT["stats"])
 
 
 # -------------------------------------------------------------------- cards
 CARD_H = 148
-SLAB_W = (W - GAP) / 2        # two slabs + one gutter = W (GitHub's inline space is 4px)
-CARD_GUTTER = GAP             # transparent strip on the left card's right side
-M_SLAB, M_H = 176, 146        # phone cards: two compact tiles side by side (~50% each)
-M_GUTTER = 6
+SLAB_W = (W - GAP) / 2
 
 
-def card(c, gutter):
-    w = SLAB_W
-    defs, body = [GRAIN, BLUR("soft", 3)], []
-    d, b = panel("c", 0, 0, w, CARD_H, r=18, key=(.15, 0), keyr=1.0, keya=.075)
-    defs.append(d); body.append(b)
+def card(c, gutter=0, w=SLAB_W):
+    d, b = panel("c", 0, 0, w, CARD_H, key=(.15, 0), keyr=1.0, keya=.075)
+    body = [b]
     pad = 22
-    p, _ = mono(c["tag"], pad, 34, 12, INK3)
-    body.append(p)
+    fits(c["tag"], 12.5, w - 2 * pad - 36, "mono")
+    body.append(mono(c["tag"], pad, 34, 12.5, INK3)[0])
     bx, by = w - pad - 14, 29
     body.append(f'<circle cx="{n(bx)}" cy="{n(by)}" r="14.5" fill="#121212" stroke="#fff" stroke-opacity=".14"/>')
-    p, _ = sans("↗", bx, by + 5, 14, INK, 500, anchor="middle")
-    body.append(p)
-    p, _ = sans(c["slug"], pad - 1, 76, 26, INK, 600, -0.03)
-    body.append(p)
+    body.append(sans("↗", bx, by + 6.2, 14, INK, 500, anchor="middle")[0])
+    body.append(sans(c["slug"], pad - 1, 76, 26, INK, 600, -0.03)[0])
     y = 104
     for line in c["lines"]:
         fits(line, 13.5, w - 2 * pad)
-        p, _ = sans(line, pad, y, 13.5, INK2, 400)
-        body.append(p)
+        body.append(sans(line, pad, y, 13.5, INK2, 400)[0])
         y += 20
     alt = f'{c["slug"]}: {" ".join(c["lines"])} ({c["tag"]})'
-    return svg(w + gutter, CARD_H, "".join(body), "".join(defs), alt), w + gutter
+    return svg(w + gutter, CARD_H, "".join(body), GRAIN + d, alt), w + gutter
 
 
-def card_mobile(c, gutter):
-    """Compact phone tile, drawn at ~1:1 for a 50% slot of a ~358px column."""
-    w, h = M_SLAB, M_H
-    defs, body = [GRAIN, BLUR("soft", 3)], []
-    d, b = panel("m", 0, 0, w, h, r=16, key=(.15, 0), keyr=1.0, keya=.08)
-    defs.append(d); body.append(b)
-    pad = 14
-    fits(c.get("mtag", c["tag"]), 10, w - 2 * pad - 26, "mono")
-    p, _ = mono(c.get("mtag", c["tag"]), pad, 24, 10, INK3)
-    body.append(p)
-    bx, by = w - pad - 10, 20
-    body.append(f'<circle cx="{n(bx)}" cy="{n(by)}" r="10.5" fill="#121212" stroke="#fff" stroke-opacity=".14"/>')
-    p, _ = sans("↗", bx, by + 3.6, 10.5, INK, 500, anchor="middle")
-    body.append(p)
-    p, _ = sans(c["slug"], pad - .5, 60, 20, INK, 600, -0.03)
-    body.append(p)
-    y = 84
-    for line in c["mlines"]:
-        fits(line, 12, w - 2 * pad)
-        p, _ = sans(line, pad, y, 12, INK2, 400)
-        body.append(p)
-        y += 17
-    alt = f'{c["slug"]}: {" ".join(c["lines"])} ({c["tag"]})'
-    return svg(w + gutter, h, "".join(body), "".join(defs), alt)
+# --------------------------------------------------------------------- keys
+KEY_H, KEY_R = 44, 12
+KEY_W = (W - 3 * GAP) / 4
+M_KEY_W, M_KEY_H, M_KEY_R = 80, 50, 11
+M_KEY_GUT = M_KEY_W * GAP / KEY_W            # same slab:gutter ratio as desktop
 
 
-# -------------------------------------------------------------------- pills
-PILL_H = 34
+def key(label, gutter):
+    w, h = KEY_W, KEY_H
+    d, b = panel("k", 0, 0, w, h, r=KEY_R, key=(.12, 0), keyr=1.0, keya=.07)
+    pad, size = 16, 12.5
+    base = h / 2 + size * .71 / 2                 # cap-height centred
+    p, _ = mono(label, pad, base, size, "#CFCFCF")
+    a, _ = sans("↗", w - pad, base + size * .087, size, INK3, 500, anchor="end")
+    return svg(w + gutter, h, b + p + a, GRAIN + d, label, pad_bottom=0)
 
 
-def pill(label):
-    pad, gutter = 15, GAP - 4
-    tw = T.width(label, 12, "mono")
-    aw = T.width("↗", 12, "sans", 500)
-    pw = pad * 2 + tw + 8 + aw
-    body = (f'<rect x=".5" y=".5" width="{n(pw - 1)}" height="{PILL_H - 1}" rx="{PILL_H / 2 - .5}" '
-            f'fill="{BG}" stroke="#fff" stroke-opacity=".12"/>')
-    p, _ = mono(label, pad, 21.5, 12, "#CFCFCF")
-    a, _ = sans("↗", pad + tw + 8, 21.5, 12, INK3, 500)
-    return svg(pw + gutter, PILL_H, body + p + a, "", label, pad_bottom=8), pw + gutter
+def key_compact(label, gutter):
+    w, h = M_KEY_W, M_KEY_H
+    d, b = panel("q", 0, 0, w, h, r=M_KEY_R, key=(.12, 0), keyr=1.0, keya=.07)
+    pad, size = 9, 11
+    lines = [label] if T.width(label, size, "mono") <= w - 2 * pad else label.split(" ", 1)
+    body = [b]
+    y = h - 11 - (len(lines) - 1) * 13
+    for ln in lines:
+        fits(ln, size, w - 2 * pad, "mono")
+        body.append(mono(ln, pad, y, size, "#CFCFCF")[0])
+        y += 13
+    body.append(sans("↗", w - pad, 18, 10, INK3, 500, anchor="end")[0])
+    return svg(w + gutter, h, "".join(body), GRAIN + d, label, pad_bottom=0)
 
 
 # ------------------------------------------------------------------- readme
-def picture(stem, alt):
-    return (f'<picture><source media="(max-width: 600px)" srcset="assets/{stem}-mobile.svg">'
-            f'<img src="assets/{stem}.svg" width="{W}" align="top" alt={quoteattr(alt)}></picture><br>')
+def pct(w):
+    return f"{math.floor(w / W * 10000) / 100}%"
+
+
+def picture(stem, alt, motion=False):
+    srcs = []
+    if motion:
+        srcs += [f'<source media="{RM} and {MQ}" srcset="assets/{stem}-compact-still.svg" width="{M_CAP}">',
+                 f'<source media="{RM}" srcset="assets/{stem}-still.svg">']
+    srcs.append(f'<source media="{MQ}" srcset="assets/{stem}-compact.svg" width="{M_CAP}">')
+    return (f'<picture>{"".join(srcs)}<img src="assets/{stem}.svg" width="{W}" align="top" '
+            f'alt={quoteattr(alt)}></picture><br>')
 
 
 def build():
-    files = {
-        "assets/hero.svg": hero(),
-        "assets/hero-mobile.svg": hero(mobile=True),
-        "assets/stats.svg": stats(),
-        "assets/stats-mobile.svg": stats(mobile=True),
-    }
-    lines = [picture("hero", ALT["hero"]), picture("stats", ALT["stats"])]
-    # Cards: percentage widths that sum to (just under) 100%, and no whitespace
-    # between the two links, so they line up with the hero at every column width.
-    # Phones swap in compact tiles via <picture media>; <a><picture> is kept
-    # intact by GitHub's README renderer (gfm).
+    files = {}
+    for compact, suffix in ((False, ""), (True, "-compact")):
+        h = hero(compact)
+        files[f"assets/hero{suffix}.svg"] = h
+        files[f"assets/hero{suffix}-still.svg"] = still(h)
+        files[f"assets/stats{suffix}.svg"] = stats(compact)
+    lines = [picture("hero", ALT["hero"], motion=True), picture("stats", ALT["stats"])]
+
+    # cards: side by side at % widths on desktop; stacked compact cards below 1012px
     row = []
     for i, c in enumerate(CARDS):
-        gut, mgut = (CARD_GUTTER, M_GUTTER) if i == 0 else (0, 0)
-        svgtext, cw = card(c, gut)
-        files[f"assets/card-{c['slug']}.svg"] = svgtext
-        files[f"assets/card-{c['slug']}-mobile.svg"] = card_mobile(c, mgut)
-        pct = math.floor(cw / W * 10000) / 100
+        art, cw = card(c, GAP if i == 0 else 0)
+        files[f"assets/card-{c['slug']}.svg"] = art
+        files[f"assets/card-{c['slug']}-compact.svg"] = card(c, 0, w=MW)[0]
         alt = f'{c["slug"]}: {" ".join(c["lines"])}'
-        row.append(f'<a href="{c["url"]}"><picture><source media="(max-width: 600px)" '
-                   f'srcset="assets/card-{c["slug"]}-mobile.svg"><img src="assets/card-{c["slug"]}.svg" '
-                   f'width="{pct}%" align="top" alt={quoteattr(alt)}></picture></a>')
+        row.append(f'<a href="{c["url"]}"><picture><source media="{MQ}" '
+                   f'srcset="assets/card-{c["slug"]}-compact.svg" width="{M_CAP}">'
+                   f'<img src="assets/card-{c["slug"]}.svg" width="{pct(cw)}" align="top" '
+                   f'alt={quoteattr(alt)}></picture></a>')
     lines.append("".join(row) + "<br>")
-    for label, url in LINKS:
+
+    # links: one full-width row of four keys
+    keys = []
+    for i, (label, url, alt) in enumerate(LINKS):
         slug = label.lower().replace(" ", "-")
-        s_, pw = pill(label)
-        files[f"assets/link-{slug}.svg"] = s_
-        lines.append(f'<a href="{url}"><img src="assets/link-{slug}.svg" width="{n(pw)}" '
-                     f'align="top" alt="{label}"></a>')
+        gut = 0 if i == len(LINKS) - 1 else GAP
+        files[f"assets/link-{slug}.svg"] = key(label, gut)
+        files[f"assets/link-{slug}-compact.svg"] = key_compact(label, 0 if gut == 0 else M_KEY_GUT)
+        keys.append(f'<a href="{url}"><picture><source media="{PQ}" srcset="assets/link-{slug}-compact.svg">'
+                    f'<img src="assets/link-{slug}.svg" width="{pct(KEY_W + gut)}" align="top" '
+                    f'alt={quoteattr(alt)}></picture></a>')
+    lines.append("".join(keys))
+
     files["README.md"] = "\n".join([
         "<!-- ami.sh · artwork generated by scripts/build.py (edit the content there) -->",
         "",
@@ -514,7 +433,7 @@ def main():
         with open(path, "w", encoding="utf-8") as f:
             f.write(text)
         keep.add(os.path.normpath(path))
-        print(f"{rel:32s} {len(text.encode()) / 1024:6.1f} KB")
+        print(f"{rel:38s} {len(text.encode()) / 1024:6.1f} KB")
     adir = os.path.join(ROOT, "assets")
     for fn in sorted(os.listdir(adir)):
         p = os.path.normpath(os.path.join(adir, fn))
