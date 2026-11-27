@@ -288,6 +288,8 @@ def prompt_parts(cmd):
 
 
 TIMELINES = {}                  # (compact, mode) -> named moments, for tooling
+FLOW_FRAMES, FLOW_DT = 24, .125   # planet field: 24 frames, a 3s seamless loop
+SCROLL_DT = .09                 # planet tokens drift right one cell per step
 HOLD = 8.0                      # loop: seconds the finished screen stays up before `clear`
 
 
@@ -392,33 +394,26 @@ def hero(compact=False, mode="loop"):
     body.append(sh.render(mode, D, ps, (x3, y), defs))
     h = round(y + (22 if compact else 30))
 
-    # ---- planet: the terminal's backdrop (it turns slowly in the looping version)
+    # ---- planet: a flowing ASCII field, the terminal's backdrop. Its tokens condense
+    # out of the '....::::----++++' ramp at the lit limb and stream off to the right.
     if compact:      # a quarter planet peeking out of the top-right corner
         R, cx, cy, gx0, sx0 = 104, w + 8, bar - 14, w - 140, w
         cw, chh, fsz, tail = 4.8, 9.6, 7.8, 58
     else:
         R, cx, cy, gx0, sx0 = 190, w + 26, bar + (h - bar) / 2, w - 400, 590
         cw, chh, fsz, tail = 6.0, 12.0, 9.6, 124
-    pl = PL.Planet(gx0, bar + 2, w, h - 2, cw, chh, cx, cy, R, tail=tail, period=48, star_x0=sx0)
-    static = PL.glyph_runs(pl.static(), lo=.10, hi=.55)
-    rows, clip = pl.surface()
-    defs.append(pl.shading_mask("pm"))
-    defs.append('<clipPath id="pc">' + "".join(
-        f'<rect x="{n(x)}" y="{n(y_)}" width="{n(ww)}" height="{n(hh)}"/>' for x, y_, ww, hh in clip) + '</clipPath>')
-    step, P = .2, pl.P
-    tick = (f'<animateTransform attributeName="transform" type="translate" '
-            f'values="{";".join(n(-i * cw) for i in range(P))}" calcMode="discrete" '
-            f'dur="{P * step:.2f}s" repeatCount="indefinite"/>') if mode == "loop" else ""
+    pl = PL.FlowPlanet(gx0, bar + 2, w, h - 2, cw, chh, cx, cy, R, tail=tail, frames=FLOW_FRAMES,
+                       star_x0=sx0)
+    pdefs, pbody = PL.flowing(pl, "p", frame_dt=FLOW_DT, scroll_dt=SCROLL_DT)
+    defs.append(pdefs)
     defs.append(f'<radialGradient id="halo" cx="{n(cx)}" cy="{n(cy)}" r="{n(R * 1.24)}" gradientUnits="userSpaceOnUse">'
                 f'<stop offset=".74" stop-color="#fff" stop-opacity="0"/>'
                 f'<stop offset=".805" stop-color="#fff" stop-opacity=".055"/>'
                 f'<stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>')
     halo = (f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(R * 1.24)}" fill="url(#halo)"/>'
             f'<circle cx="{n(cx)}" cy="{n(cy)}" r="{n(R)}" fill="#000" fill-opacity=".28"/>')
-    surface = (f'<g clip-path="url(#pc)" mask="url(#pm)"><g fill-opacity=".84">{tick}'
-               + "".join(PL.row_text(xs, yb, txt) for xs, yb, txt in rows) + '</g></g>')
     planet = (f'<g clip-path="url(#wc)" fill="#fff" font-family="{PL.FONT}" font-size="{fsz}" '
-              f'xml:space="preserve">{halo}{static}{surface}</g>')
+              f'xml:space="preserve">{halo}{pbody}</g>')
 
     cd, cb, edge = window_chrome(w, h, bar, f"{USER}: ~", tsize)
     defs.append(cd)
