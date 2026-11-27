@@ -145,3 +145,47 @@ def text(s, x, y, size, kind="sans", wght=400, fill="#fff", tracking=0.0,
 
 def width(s, size, kind="sans", wght=400, tracking=0.0):
     return face(kind, wght).width(s, size, tracking)
+
+
+class Glyphs:
+    """Outline each glyph once per document and <use> it everywhere it repeats.
+
+    Mono text repeats a lot, so this keeps the SVGs small while the type stays
+    exactly Geist. Call text() while drawing, then put defs() in <defs>."""
+
+    def __init__(self, prefix="g"):
+        self.prefix, self.ids, self.paths = prefix, {}, []
+
+    def _ref(self, kind, wght, gname):
+        key = (kind, wght, gname)
+        if key not in self.ids:
+            f = face(kind, wght)
+            pen = SVGPathPen(f.glyphs, ntos=_num)
+            f.glyphs[gname].draw(TransformPen(pen, (1, 0, 0, -1, 0, 0)))     # font units, y down
+            d = pen.getCommands()
+            gid = None
+            if d:
+                gid = f"{self.prefix}{len(self.paths)}"
+                self.paths.append(f'<path id="{gid}" d="{d}"/>')
+            self.ids[key] = gid
+        return self.ids[key]
+
+    def text(self, s, x, y, size, kind="sans", wght=400, fill="#fff", tracking=0.0,
+             anchor="start", extra=""):
+        f = face(kind, wght)
+        lay, w = f.layout(s, size, tracking)
+        if anchor == "middle":
+            x -= w / 2
+        elif anchor == "end":
+            x -= w
+        sc = size / f.upm
+        uses = []
+        for g, off in lay:
+            gid = self._ref(kind, wght, g)
+            if gid:
+                uses.append(f'<use href="#{gid}" x="{_num(off / sc)}"/>')
+        return (f'<g fill="{fill}" transform="translate({_num(x)} {_num(y)}) scale({sc:.6g})"{extra}>'
+                + "".join(uses) + "</g>"), w
+
+    def defs(self):
+        return "".join(self.paths)
